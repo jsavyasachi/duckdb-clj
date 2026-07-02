@@ -19,13 +19,13 @@ wrappers for `read_parquet`, `read_csv`, `ATTACH`, and extensions.
 deps.edn:
 
 ```clojure
-net.clojars.savya/duckdb-clj {:mvn/version "0.1.0"}
+net.clojars.savya/duckdb-clj {:mvn/version "0.1.1"}
 ```
 
 Leiningen:
 
 ```clojure
-[net.clojars.savya/duckdb-clj "0.1.0"]
+[net.clojars.savya/duckdb-clj "0.1.1"]
 ```
 
 Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
@@ -98,6 +98,12 @@ values are SQL-escaped.
 - The `java.util.Map` `ReadableColumn` extension is process-global across all
   `next.jdbc` usage in the JVM (it converts Java maps to Clojure maps - benign,
   but noted).
+- **Bulk transfer**: this library rides JDBC, which is row-at-a-time - fine for
+  results you'd hold as Clojure data, wrong for multi-million-row extracts. For
+  bulk columnar work use
+  [tmducken](https://github.com/techascent/tmducken) (DuckDB C API ->
+  tech.ml.dataset) or DuckDB's
+  [ADBC](https://duckdb.org/docs/current/clients/adbc) client instead.
 
 Errors are `ex-info` maps keyed `:duckdb/error`
 (`:missing-struct-field`, `:invalid-option`, `:invalid-alias`).
