@@ -69,3 +69,61 @@
           (is (= "plain" (:label row)))
           (is (inst? (:happened_at row))))))))
 
+(deftest writes-clojure-data-as-duckdb-nested-types
+  (with-connection
+    (fn [con]
+      (jdbc/execute!
+       con
+       ["create table write_values
+         (tags varchar[],
+          seq_tags varchar[],
+          info struct(name varchar, age int),
+          nil_info struct(name varchar, age int),
+          meta map(varchar, int),
+          int_meta map(int, varchar),
+          people struct(name varchar, age int)[],
+          nested struct(xs int[], m map(varchar, int)),
+          quoted struct(\"name\" varchar, \"order\" int),
+          empty_tags varchar[])"])
+      (testing "missing struct fields fail before binding"
+        (let [e (is (thrown-with-msg?
+                     clojure.lang.ExceptionInfo
+                     #"Missing STRUCT field"
+                     (jdbc/execute!
+                      con
+                      ["insert into write_values(info) values (?)" {:age 1}])))]
+          (is (= {:duckdb/error :missing-struct-field
+                  :field "name"
+                  :type "STRUCT(\"name\" VARCHAR, age INTEGER)"}
+                 (ex-data e)))))
+      (jdbc/execute!
+       con
+       ["insert into write_values values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ["a" "b"]
+        (list "c" "d")
+        {:name "alice" :age 30}
+        {:name nil :age 1}
+        {"k" 1}
+        {1 "x"}
+        [{:name "a" :age 1} {:name "b" :age 2}]
+        {:xs [1 2] :m {"k" 9}}
+        {:name "reserved" :order 4}
+        []])
+      (let [row (first (jdbc/execute! con ["select * from write_values"]))]
+        (testing "LIST values"
+          (is (= ["a" "b"] (:tags row)))
+          (is (= ["c" "d"] (:seq_tags row)))
+          (is (= [] (:empty_tags row))))
+        (testing "STRUCT values"
+          (is (= {:name "alice" :age 30} (:info row)))
+          (is (= {:name nil :age 1} (:nil_info row)))
+          (is (= {:name "reserved" :order 4} (:quoted row))))
+        (testing "MAP values"
+          (is (= {"k" 1} (:meta row)))
+          (is (= {1 "x"} (:int_meta row))))
+        (testing "nested LIST/STRUCT/MAP values"
+          (is (= [{:name "a" :age 1} {:name "b" :age 2}]
+                 (:people row)))
+          (is (= {:xs [1 2] :m {"k" 9}} (:nested row)))))
+      (testing "untyped parameters fall back to raw next.jdbc binding"
+        (is (= {:v "plain"} (first (jdbc/execute! con ["select ? as v" "plain"]))))))))
