@@ -127,3 +127,20 @@
           (is (= {:xs [1 2] :m {"k" 9}} (:nested row)))))
       (testing "untyped parameters fall back to raw next.jdbc binding"
         (is (= {:v "plain"} (first (jdbc/execute! con ["select ? as v" "plain"]))))))))
+
+(deftest writes-enum-values-from-keywords-and-strings
+  (with-connection
+    (fn [con]
+      (jdbc/execute! con ["create type mood as enum ('sad', 'ok', 'happy')"])
+      (jdbc/execute! con ["create table enum_values (id int, mood mood)"])
+      (jdbc/execute! con ["insert into enum_values values (?, ?)" 1 :happy])
+      (jdbc/execute! con ["insert into enum_values values (?, ?)" 2 "ok"])
+      (testing "ENUM values read back as plain strings"
+        (is (= [{:id 1 :mood "happy"}
+                {:id 2 :mood "ok"}]
+               (jdbc/execute! con ["select * from enum_values order by id"]))))
+      (testing "invalid enum values surface DuckDB's native input error"
+        (is (thrown-with-msg?
+             java.sql.SQLException
+             #"Could not convert string|Invalid Input Error|Conversion Error"
+             (jdbc/execute! con ["insert into enum_values values (?, ?)" 3 :missing])))))))

@@ -87,6 +87,9 @@
 (defn ^:no-doc map-type? [type-name]
   (starts-with-ci? type-name "MAP("))
 
+(defn ^:no-doc enum-type? [type-name]
+  (= "ENUM" (some-> type-name str str/trim str/upper-case)))
+
 (defn- field-name-and-type [segment]
   (let [segment (str/trim (str segment))]
     (if (str/starts-with? segment "\"")
@@ -167,6 +170,13 @@
       (.setObject stmt ix (clj->duckdb type-name value))
       (.setObject stmt ix value))))
 
+(defn- set-duckdb-keyword-parameter [^clojure.lang.Keyword value ^PreparedStatement stmt ^long ix]
+  (let [type-name (parameter-type-name stmt ix)
+        value-name (name value)]
+    (if (enum-type? type-name)
+      (.setString stmt ix value-name)
+      (.setObject stmt ix value-name))))
+
 (extend-protocol prep/SettableParameter
   clojure.lang.IPersistentVector
   (set-parameter [v stmt ix]
@@ -178,7 +188,11 @@
 
   clojure.lang.IPersistentMap
   (set-parameter [v stmt ix]
-    (set-duckdb-parameter v stmt ix)))
+    (set-duckdb-parameter v stmt ix))
+
+  clojure.lang.Keyword
+  (set-parameter [v stmt ix]
+    (set-duckdb-keyword-parameter v stmt ix)))
 
 (extend-protocol rs/ReadableColumn
   DuckDBArray

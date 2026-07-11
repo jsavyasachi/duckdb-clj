@@ -5,8 +5,8 @@
 [![test](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml)
 
 DuckDB type coercion and helpers for Clojure over `next.jdbc`: LIST, STRUCT,
-and MAP columns round-trip as plain Clojure vectors and maps, plus thin
-wrappers for `read_parquet`, `read_csv`, `ATTACH`, and extensions.
+MAP, and ENUM columns round-trip as plain Clojure data, plus thin wrappers for
+`read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
 
 ## Stack
 
@@ -19,13 +19,13 @@ wrappers for `read_parquet`, `read_csv`, `ATTACH`, and extensions.
 deps.edn:
 
 ```clojure
-net.clojars.savya/duckdb-clj {:mvn/version "0.1.1"}
+net.clojars.savya/duckdb-clj {:mvn/version "0.2.0"}
 ```
 
 Leiningen:
 
 ```clojure
-[net.clojars.savya/duckdb-clj "0.1.1"]
+[net.clojars.savya/duckdb-clj "0.2.0"]
 ```
 
 Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
@@ -39,28 +39,60 @@ extends `next.jdbc`'s protocols on load.
 
 (def ds (duck/file-datasource "analytics.db"))   ; or (duck/memory-datasource)
 
+(jdbc/execute! ds ["create type mood as enum ('sad', 'ok', 'happy')"])
+
 (jdbc/execute! ds ["create table events (
                       id int,
                       tags varchar[],
                       user struct(name varchar, age int),
-                      counts map(varchar, int))"])
+                      counts map(varchar, int),
+                      mood mood)"])
 
-;; write: plain Clojure data binds into LIST / STRUCT / MAP parameters
-(jdbc/execute! ds ["insert into events values (?, ?, ?, ?)"
+;; write: plain Clojure data binds into LIST / STRUCT / MAP / ENUM parameters
+(jdbc/execute! ds ["insert into events values (?, ?, ?, ?, ?)"
                    1
                    ["signup" "mobile"]
                    {:name "alice" :age 30}
-                   {"clicks" 12 "views" 40}])
+                   {"clicks" 12 "views" 40}
+                   :happy])
 
 ;; read: they come back as Clojure data
 (jdbc/execute! ds ["select * from events"])
 ;; => [{:id 1
 ;;      :tags ["signup" "mobile"]
 ;;      :user {:name "alice" :age 30}
-;;      :counts {"clicks" 12 "views" 40}}]
+;;      :counts {"clicks" 12 "views" 40}
+;;      :mood "happy"}]
 ```
 
 Nesting works in both directions (LIST of STRUCT, STRUCT containing MAP, ...).
+ENUM columns read as strings; write keywords or strings as parameters.
+
+### Bulk append
+
+```clojure
+(jdbc/execute! ds ["create table metrics (
+                     id int,
+                     name varchar,
+                     score double,
+                     tags varchar[],
+                     info struct(source varchar, batch int))"])
+
+(duck/append!
+ ds
+ :metrics
+ [{:name "alpha" :score 1.5 :id 1
+   :tags ["daily" "mobile"]
+   :info {:source "api" :batch 7}}
+  {:id 2 :name "beta" :score 2.25
+   :tags []
+   :info {:source "job" :batch 8}}])
+;; => 2
+```
+
+`append!` takes rows as maps and appends values in the table's declared column
+order, not the map's iteration order. It uses DuckDB's Appender API and supports
+common scalar values plus nested LIST and STRUCT values.
 
 ### File helpers
 
@@ -98,15 +130,16 @@ values are SQL-escaped.
 - The `java.util.Map` `ReadableColumn` extension is process-global across all
   `next.jdbc` usage in the JVM (it converts Java maps to Clojure maps - benign,
   but noted).
-- **Bulk transfer**: this library rides JDBC, which is row-at-a-time - fine for
-  results you'd hold as Clojure data, wrong for multi-million-row extracts. For
-  bulk columnar work use
+- **Bulk transfer**: `append!` uses DuckDB's Appender API for faster row ingest
+  from Clojure maps. For bulk columnar extracts and very large analytical
+  transfers, use
   [tmducken](https://github.com/techascent/tmducken) (DuckDB C API ->
   tech.ml.dataset) or DuckDB's
   [ADBC](https://duckdb.org/docs/current/clients/adbc) client instead.
 
 Errors are `ex-info` maps keyed `:duckdb/error`
-(`:missing-struct-field`, `:invalid-option`, `:invalid-alias`).
+(`:missing-struct-field`, `:invalid-option`, `:invalid-alias`,
+`:append-failed`).
 
 ## Running tests
 

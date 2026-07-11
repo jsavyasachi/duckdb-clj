@@ -116,3 +116,52 @@
       (is (string? version))
       (is (str/starts-with? version "v"))
       (is (not (str/blank? version))))))
+
+(deftest appends-map-rows-in-table-column-order
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table append_values (id int, name varchar, score double)"])
+    (is (= 4
+           (duckdb/append!
+            con
+            :append_values
+            [{:score 1.5 :name "alice" :id 1}
+             {:name "bob" :id 2 :score 2.25}
+             {:id 3 :score 3.75 :name "carol"}
+             {:id 4 :name "dave" :score nil}])))
+    (is (= [{:id 1 :name "alice" :score 1.5}
+            {:id 2 :name "bob" :score 2.25}
+            {:id 3 :name "carol" :score 3.75}
+            {:id 4 :name "dave" :score nil}]
+           (jdbc/execute! con ["select * from append_values order by id"])))))
+
+(deftest appends-nested-map-rows
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute!
+     con
+     ["create table append_nested
+       (id int,
+        tags varchar[],
+        info struct(name varchar, age int))"])
+    (is (= 2
+           (duckdb/append!
+            con
+            :append_nested
+            [{:id 1 :tags ["a" "b"] :info {:name "alice" :age 30}}
+             {:id 2 :tags [] :info {:name "bob" :age 41}}])))
+    (is (= [{:id 1 :tags ["a" "b"] :info {:name "alice" :age 30}}
+            {:id 2 :tags [] :info {:name "bob" :age 41}}]
+           (jdbc/execute! con ["select * from append_nested order by id"])))))
+
+(deftest wraps-appender-failures-with-row-context
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table append_failures (id int, name varchar)"])
+    (let [e (is (thrown? clojure.lang.ExceptionInfo
+                         (duckdb/append!
+                          con
+                          :append_failures
+                          [{:id 1 :name "ok"}
+                           {:id "not-an-int" :name "bad"}])))]
+      (is (= :append-failed (:duckdb/error (ex-data e))))
+      (is (= 1 (:row-index (ex-data e))))
+      (is (= "java.sql.SQLException" (:cause-class (ex-data e))))
+      (is (string? (:cause-message (ex-data e)))))))
