@@ -34,6 +34,59 @@
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (is (= [{:v 1}] (jdbc/execute! con ["select 1 as v"])))))
 
+(deftest configurable-datasource-properties
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "read-only.duckdb")]
+        (with-open [con (jdbc/get-connection (duckdb/file-datasource db-path))]
+          (jdbc/execute! con ["create table existing (id integer)"]))
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:read-only true}))]
+          (is (.isReadOnly con))
+          (is (thrown? SQLException
+                       (jdbc/execute! con ["create table forbidden (id integer)"])))))))
+  (with-open [con (jdbc/get-connection
+                   (duckdb/memory-datasource
+                    {:settings {:threads 2}
+                     :session-init-sql "set TimeZone = 'UTC'"
+                     :auto-commit false
+                     :user-agent "duckdb-clj-test"}))]
+    (is (false? (.getAutoCommit con)))
+    (is (= [{:threads 2 :timezone "UTC" :user_agent "duckdb-clj-test"}]
+           (jdbc/execute!
+            con
+            ["select current_setting('threads')::integer as threads,
+                     current_setting('TimeZone') as timezone,
+                     current_setting('custom_user_agent') as user_agent"])))))
+
+(deftest duplicates-connections-to-the-same-database
+  (with-open [con (jdbc/get-connection
+                   (duckdb/memory-datasource
+                    {:session-init-sql "set TimeZone = 'Asia/Tokyo'"
+                     :auto-commit false}))]
+    (jdbc/execute! con ["create table shared (id integer)"])
+    (jdbc/execute! con ["insert into shared values (42)"])
+    (.commit con)
+    (with-open [^java.sql.Connection duplicate (duckdb/duplicate con)]
+      (is (false? (.getAutoCommit duplicate)))
+      (is (= [{:timezone "Asia/Tokyo"}]
+             (jdbc/execute! duplicate ["select current_setting('TimeZone') as timezone"])))
+      (is (= [{:id 42}] (jdbc/execute! duplicate ["select * from shared"]))))
+    (is (= [{:id 42}] (jdbc/execute! con ["select * from shared"])))))
+
+(deftest duplicate-inherits-read-only-mode
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "duplicate-read-only.duckdb")]
+        (with-open [con (jdbc/get-connection (duckdb/file-datasource db-path))]
+          (jdbc/execute! con ["create table existing (id integer)"]))
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:read-only true}))
+                    ^java.sql.Connection duplicate (duckdb/duplicate con)]
+          (is (.isReadOnly duplicate))
+          (is (thrown? SQLException
+                       (jdbc/execute! duplicate ["insert into existing values (1)"]))))))))
+
 (deftest reads-parquet-with-coercion-and-options
   (with-temp-dir
     (fn [dir]
@@ -117,6 +170,20 @@
       (is (str/starts-with? version "v"))
       (is (not (str/blank? version))))))
 
+(deftest exposes-explicit-driver-global-lifecycle
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "pinned.duckdb")
+            jdbc-url (str "jdbc:duckdb:" db-path)]
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:pin-db true}))]
+          (jdbc/execute! con ["create table pinned_value (id integer)"]))
+        (is (true? (duckdb/release-db! jdbc-url)))
+        (is (false? (duckdb/release-db! jdbc-url))))))
+  (duckdb/clear-functions-registry!)
+  (is (= [] (duckdb/registered-functions)))
+  (is (boolean? (duckdb/shutdown-cancel-scheduler!))))
+
 (deftest appends-map-rows-in-table-column-order
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create table append_values (id int, name varchar, score double)"])
@@ -133,6 +200,105 @@
             {:id 3 :name "carol" :score 3.75}
             {:id 4 :name "dave" :score nil}]
            (jdbc/execute! con ["select * from append_values order by id"])))))
+
+(deftest appends-to-catalog-and-schema-qualified-tables
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create schema analytics"])
+    (jdbc/execute! con ["create table analytics.events (id integer, label varchar)"])
+    (let [catalog (:catalog (first (jdbc/execute! con ["select current_catalog() as catalog"])))]
+      (is (= 2
+             (duckdb/append!
+              con
+              {:catalog catalog :schema :analytics :table :events}
+              [{:id 1 :label "one"} {:id 2 :label "two"}]))))
+    (is (= [{:id 1 :label "one"} {:id 2 :label "two"}]
+           (jdbc/execute! con ["select * from analytics.events order by id"])))))
+
+(deftest appends-blob-byte-arrays
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table blobs (id integer, payload blob)"])
+    (is (= 1 (duckdb/append! con :blobs [{:id 1 :payload (byte-array [0 1 -1])}])))
+    (let [^java.sql.Blob payload (:payload (first (jdbc/execute! con ["select payload from blobs"])))]
+      (is (= [0 1 -1]
+             (vec (.getBytes payload 1 (int (.length payload)))))))))
+
+(deftest appends-explicit-and-composite-values
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute!
+     con
+     ["create table advanced
+       (defaulted integer default 99,
+        choice union(i integer, s varchar),
+        masked integer[],
+        fixed integer[3],
+        huge hugeint,
+        uid uuid,
+        day date,
+        nanos timestamp_ns)"])
+    (is (= 1
+           (duckdb/append!
+            con
+            :advanced
+            [{:defaulted (duckdb/default-value)
+              :choice (duckdb/union-value :i 7)
+              :masked (duckdb/array-value
+                       (int-array [1 2 3])
+                       (boolean-array [true false true]))
+              :fixed (duckdb/fixed-size-value [4 5 6] 3)
+              :huge (duckdb/hugeint-value 42 0)
+              :uid (duckdb/uuid-value 0 1)
+              :day (duckdb/epoch-days 1)
+              :nanos (duckdb/epoch-nanos 1001)}])))
+    (is (= [{:defaulted 99
+             :choice 7
+             :masked [1 nil 3]
+             :fixed [4 5 6]
+             :huge "42"
+             :uid "00000000-0000-0000-0000-000000000001"
+             :day "1970-01-02"
+             :nanos 1001}]
+           (jdbc/execute!
+            con
+            ["select defaulted,
+                     union_extract(choice, 'i') as choice,
+                     masked,
+                     fixed,
+                     huge::varchar as huge,
+                     uid::varchar as uid,
+                     day::varchar as day,
+                     epoch_ns(nanos) as nanos
+                from advanced"])))))
+
+(deftest appender-wrapper-constructors-are-private
+  (let [publics (ns-publics 'duckdb.core)]
+    (is (not-any? #(contains? publics %)
+                  '[->DefaultValue ->UnionValue ->ArrayValue ->FixedSizeValue
+                    ->HugeIntValue ->UUIDValue ->TemporalValue]))))
+
+(deftest appends-single-column-values
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table single_int (value integer)"])
+    (jdbc/execute! con ["create table single_timestamp (value timestamp)"])
+    (jdbc/execute! con ["create table single_decimal (value decimal(10, 2))"])
+    (jdbc/execute! con ["create table single_string (value varchar)"])
+    (jdbc/execute! con ["create table single_blob (value blob)"])
+    (is (= 3 (duckdb/append-single! con :main :single_int [1 2 3])))
+    (let [timestamp (java.time.LocalDateTime/of 2026 7 16 12 34 56)
+          decimal (bigdec "1234.50")]
+      (is (= 1 (duckdb/append-single! con :main :single_timestamp [timestamp])))
+      (is (= 1 (duckdb/append-single! con :main :single_decimal [decimal])))
+      (is (= 2 (duckdb/append-single! con :main :single_string ["duck" nil])))
+      (is (= 1 (duckdb/append-single! con :main :single_blob [(byte-array [0 1 -1])])))
+      (is (= [{:value 1} {:value 2} {:value 3}]
+             (jdbc/execute! con ["select * from single_int order by value"])))
+      (is (= [{:value "2026-07-16 12:34:56"}]
+             (jdbc/execute! con ["select value::varchar as value from single_timestamp"])))
+      (is (= [{:value decimal}]
+             (jdbc/execute! con ["select * from single_decimal"])))
+      (is (= [{:value "duck"} {:value nil}]
+             (jdbc/execute! con ["select * from single_string order by value nulls last"])))
+      (is (= [{:value "0001FF"}]
+             (jdbc/execute! con ["select hex(value) as value from single_blob"]))))))
 
 (deftest appends-nested-map-rows
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]

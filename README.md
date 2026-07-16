@@ -31,6 +31,25 @@ Leiningen:
 Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
 extends `next.jdbc`'s protocols on load.
 
+### Arrow
+
+`duckdb.arrow` is optional. Add mutually compatible Apache Arrow modules in an
+alias rather than the base dependency set:
+
+```clojure
+{:aliases
+ {:arrow
+  {:extra-deps
+   {org.apache.arrow/arrow-vector {:mvn/version "18.3.0"}
+    org.apache.arrow/arrow-memory-core {:mvn/version "18.3.0"}
+    org.apache.arrow/arrow-memory-unsafe {:mvn/version "18.3.0"}
+    org.apache.arrow/arrow-c-data {:mvn/version "18.3.0"}}
+   :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"]}}}
+```
+
+Run with the alias, for example `clojure -M:arrow`. The `--add-opens` runtime
+flag is required for Arrow off-heap memory access on JDK 16 and newer.
+
 ## Usage
 
 ```clojure
