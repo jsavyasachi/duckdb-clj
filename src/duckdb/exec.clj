@@ -1,14 +1,18 @@
 (ns duckdb.exec
   "DuckDB-native query execution helpers over next.jdbc."
-  (:require [duckdb.types]
+  (:require [clojure.string :as str]
+            [duckdb.types]
             [next.jdbc :as jdbc]
-            [next.jdbc.connection :as connection])
-  (:import (java.sql Connection)
+            [next.jdbc.connection :as connection]
+            [next.jdbc.prepare :as prep])
+  (:import (java.math BigInteger)
+           (java.sql Connection ParameterMetaData ResultSetMetaData)
            (java.util Properties)
            (javax.sql DataSource)
            (org.duckdb DuckDBChunkedResult DuckDBColumnType
-                       DuckDBDataChunkReader DuckDBDriver
-                       DuckDBPreparedStatement DuckDBReadableVector)))
+                       DuckDBConnection DuckDBDataChunkReader DuckDBDriver
+                       DuckDBPreparedStatement DuckDBReadableVector
+                       DuckDBResultSetMetaData)))
 
 (set! *warn-on-reflection* true)
 
@@ -113,3 +117,70 @@
   are copied before the native DuckDBChunkedResult is closed."
   [^DuckDBPreparedStatement stmt]
   (reduce-chunks stmt conj []))
+
+(defn prepare
+  "Creates a reusable native DuckDB prepared statement.
+
+  The returned DuckDBPreparedStatement is AutoCloseable and should be scoped
+  with with-open. Its Connection must remain open for the statement lifetime."
+  ^DuckDBPreparedStatement [^Connection con sql]
+  (when-not (string? sql)
+    (throw (ex-info "Prepared SQL must be a string"
+                    {:duckdb/error :invalid-sql
+                     :sql sql})))
+  (let [^DuckDBConnection duck-con (.unwrap con DuckDBConnection)]
+    (.prepare duck-con sql)))
+
+(defn parameter-metadata
+  "Returns ordered JDBC parameter-type metadata for stmt."
+  [^DuckDBPreparedStatement stmt]
+  (let [^ParameterMetaData metadata (.getParameterMetaData stmt)]
+    (mapv (fn [index]
+            {:index index
+             :type (.getParameterType metadata index)
+             :type-name (.getParameterTypeName metadata index)
+             :class-name (.getParameterClassName metadata index)
+             :precision (.getPrecision metadata index)
+             :scale (.getScale metadata index)
+             :nullable (.isNullable metadata index)
+             :signed? (.isSigned metadata index)})
+          (range 1 (inc (.getParameterCount metadata))))))
+
+(defn- return-type-keyword [return-type]
+  (-> return-type str str/lower-case (str/replace "_" "-") keyword))
+
+(defn return-metadata
+  "Returns the native statement return type and ordered result columns."
+  [^DuckDBPreparedStatement stmt]
+  (let [^DuckDBResultSetMetaData metadata (.getMetaData stmt)
+        ^ResultSetMetaData rsmeta metadata]
+    {:return-type (return-type-keyword (.getReturnType metadata))
+     :columns (mapv (fn [index]
+                      {:index index
+                       :name (.getColumnLabel rsmeta index)
+                       :type-name (.getColumnTypeName rsmeta index)})
+                    (range 1 (inc (.getColumnCount rsmeta))))}))
+
+(defn set-fetch-size!
+  "Sets the JDBC fetch size on stmt and returns stmt."
+  [^DuckDBPreparedStatement stmt rows]
+  (.setFetchSize stmt rows)
+  stmt)
+
+(defn bind-parameters!
+  "Binds params in order on a reusable statement and returns stmt."
+  [^DuckDBPreparedStatement stmt params]
+  (prep/set-parameters stmt params)
+  stmt)
+
+(defn bind-hugeint!
+  "Binds an integer as DuckDB HUGEINT at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index value]
+  (when-not (integer? value)
+    (throw (ex-info (str "DuckDB HUGEINT value must be an integer: " (pr-str value))
+                    {:duckdb/error :invalid-hugeint
+                     :value value})))
+  (.setBigInteger stmt index (if (instance? BigInteger value)
+                               value
+                               (biginteger value)))
+  stmt)
