@@ -10,14 +10,15 @@
            (java.util Collection Collections Date LinkedHashMap Map Properties UUID WeakHashMap)
            (java.util.logging Logger)
            (javax.sql DataSource)
-           (org.duckdb DuckDBAppender DuckDBConnection DuckDBDriver DuckDBSingleValueAppender)))
+           (org.duckdb DuckDBAppender DuckDBConnection DuckDBDriver
+                       DuckDBFunctions$RegisteredFunction DuckDBSingleValueAppender)))
 
 (set! *warn-on-reflection* true)
 
 (def ^:private simple-option-pattern #"^[a-z0-9_]+$")
 (def ^:private identifier-pattern #"^[A-Za-z_][A-Za-z0-9_]*$")
 (def ^:private datasource-option-keys
-  #{:access-mode :auto-commit :read-only :session-init-sql :settings :user-agent})
+  #{:access-mode :auto-commit :pin-db :read-only :session-init-sql :settings :user-agent})
 (def ^:private connection-session-init
   (Collections/synchronizedMap (WeakHashMap.)))
 
@@ -76,6 +77,9 @@
     (when (contains? opts :auto-commit)
       (.setProperty properties DuckDBDriver/JDBC_AUTO_COMMIT
                     (property-value (:auto-commit opts))))
+    (when (contains? opts :pin-db)
+      (.setProperty properties DuckDBDriver/JDBC_PIN_DB
+                    (property-value (:pin-db opts))))
     (when (contains? opts :user-agent)
       (.setProperty properties DuckDBDriver/DUCKDB_USER_AGENT_PROPERTY
                     (str (:user-agent opts))))
@@ -96,7 +100,8 @@
   "Returns a DuckDB datasource for jdbc-url using java.util.Properties.
 
   Options are :read-only, :access-mode (:read-only, :read-write, or
-  :automatic), :settings, :session-init-sql, :auto-commit, and :user-agent."
+  :automatic), :settings, :session-init-sql, :auto-commit, :user-agent, and
+  :pin-db."
   ([jdbc-url]
    (datasource jdbc-url nil))
   ([jdbc-url opts]
@@ -646,6 +651,41 @@
   "Loads a DuckDB extension by name."
   [ds name]
   (jdbc/execute! ds [(str "load " (identifier :name name))]))
+
+(defn release-db!
+  "Releases the database pinned for jdbc-url.
+
+  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
+  Never place this in automatic connection or datasource cleanup."
+  [jdbc-url]
+  (DuckDBDriver/releaseDB (str jdbc-url)))
+
+(defn shutdown-cancel-scheduler!
+  "Shuts down DuckDB JDBC's query-cancellation scheduler.
+
+  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
+  Never place this in automatic connection or datasource cleanup."
+  []
+  (DuckDBDriver/shutdownQueryCancelScheduler))
+
+(defn registered-functions
+  "Returns DuckDB JDBC's process-global registered UDFs as maps.
+
+  PROCESS-GLOBAL: this inspects the registry shared by every DuckDB connection
+  in the JVM."
+  []
+  (mapv (fn [^DuckDBFunctions$RegisteredFunction function]
+          {:name (.name function)
+           :kind (keyword (str/lower-case (str (.functionKind function))))})
+        (DuckDBDriver/registeredFunctions)))
+
+(defn clear-functions-registry!
+  "Clears DuckDB JDBC's registered UDF metadata.
+
+  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
+  Never place this in automatic connection or datasource cleanup."
+  []
+  (DuckDBDriver/clearFunctionsRegistry))
 
 (defn duckdb-version
   "Returns the DuckDB version string for ds."

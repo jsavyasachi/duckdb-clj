@@ -170,6 +170,20 @@
       (is (str/starts-with? version "v"))
       (is (not (str/blank? version))))))
 
+(deftest exposes-explicit-driver-global-lifecycle
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "pinned.duckdb")
+            jdbc-url (str "jdbc:duckdb:" db-path)]
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:pin-db true}))]
+          (jdbc/execute! con ["create table pinned_value (id integer)"]))
+        (is (true? (duckdb/release-db! jdbc-url)))
+        (is (false? (duckdb/release-db! jdbc-url))))))
+  (duckdb/clear-functions-registry!)
+  (is (= [] (duckdb/registered-functions)))
+  (is (boolean? (duckdb/shutdown-cancel-scheduler!))))
+
 (deftest appends-map-rows-in-table-column-order
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create table append_values (id int, name varchar, score double)"])
