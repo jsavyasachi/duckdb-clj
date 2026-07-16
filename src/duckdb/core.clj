@@ -234,6 +234,11 @@
 (deftype ^:private UUIDValue [upper lower])
 (deftype ^:private TemporalValue [encoding value offset])
 
+(doseq [constructor [#'->DefaultValue #'->UnionValue #'->ArrayValue
+                     #'->FixedSizeValue #'->HugeIntValue #'->UUIDValue
+                     #'->TemporalValue]]
+  (alter-meta! constructor assoc :private true))
+
 (def ^:private default-value-instance (DefaultValue.))
 (def ^:private byte-array-class (class (byte-array 0)))
 (def ^:private byte-array-2d-class (class (make-array Byte/TYPE 0 0)))

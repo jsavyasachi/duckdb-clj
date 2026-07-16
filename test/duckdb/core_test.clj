@@ -269,6 +269,12 @@
                      epoch_ns(nanos) as nanos
                 from advanced"])))))
 
+(deftest appender-wrapper-constructors-are-private
+  (let [publics (ns-publics 'duckdb.core)]
+    (is (not-any? #(contains? publics %)
+                  '[->DefaultValue ->UnionValue ->ArrayValue ->FixedSizeValue
+                    ->HugeIntValue ->UUIDValue ->TemporalValue]))))
+
 (deftest appends-single-column-values
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create table single_int (value integer)"])
