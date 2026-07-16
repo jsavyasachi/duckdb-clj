@@ -5,10 +5,21 @@
         org.duckdb/duckdb_jdbc {:mvn/version "1.5.4.0"}}
 
  :aliases
- {:test
+ {:arrow
+  {:extra-deps {org.apache.arrow/arrow-vector {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-memory-core {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-memory-unsafe {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-c-data {:mvn/version "18.3.0"}}}
+
+  :test
   {:extra-paths ["test" "dev"]
    :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                org.slf4j/slf4j-nop {:mvn/version "2.0.18"}}
+                org.slf4j/slf4j-nop {:mvn/version "2.0.18"}
+                org.apache.arrow/arrow-vector {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-memory-core {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-memory-unsafe {:mvn/version "18.3.0"}
+                org.apache.arrow/arrow-c-data {:mvn/version "18.3.0"}}
+   :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"]
    :main-opts ["-m" "kaocha.runner"]}
 
   ;; Clojure version overrides for the CI matrix:
