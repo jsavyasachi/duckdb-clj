@@ -187,6 +187,74 @@
             {:id 4 :name "dave" :score nil}]
            (jdbc/execute! con ["select * from append_values order by id"])))))
 
+(deftest appends-to-catalog-and-schema-qualified-tables
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create schema analytics"])
+    (jdbc/execute! con ["create table analytics.events (id integer, label varchar)"])
+    (let [catalog (:catalog (first (jdbc/execute! con ["select current_catalog() as catalog"])))]
+      (is (= 2
+             (duckdb/append!
+              con
+              {:catalog catalog :schema :analytics :table :events}
+              [{:id 1 :label "one"} {:id 2 :label "two"}]))))
+    (is (= [{:id 1 :label "one"} {:id 2 :label "two"}]
+           (jdbc/execute! con ["select * from analytics.events order by id"])))))
+
+(deftest appends-blob-byte-arrays
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table blobs (id integer, payload blob)"])
+    (is (= 1 (duckdb/append! con :blobs [{:id 1 :payload (byte-array [0 1 -1])}])))
+    (let [^java.sql.Blob payload (:payload (first (jdbc/execute! con ["select payload from blobs"])))]
+      (is (= [0 1 -1]
+             (vec (.getBytes payload 1 (int (.length payload)))))))))
+
+(deftest appends-explicit-and-composite-values
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute!
+     con
+     ["create table advanced
+       (defaulted integer default 99,
+        choice union(i integer, s varchar),
+        masked integer[],
+        fixed integer[3],
+        huge hugeint,
+        uid uuid,
+        day date,
+        nanos timestamp_ns)"])
+    (is (= 1
+           (duckdb/append!
+            con
+            :advanced
+            [{:defaulted (duckdb/default-value)
+              :choice (duckdb/union-value :i 7)
+              :masked (duckdb/array-value
+                       (int-array [1 2 3])
+                       (boolean-array [true false true]))
+              :fixed (duckdb/fixed-size-value [4 5 6] 3)
+              :huge (duckdb/hugeint-value 42 0)
+              :uid (duckdb/uuid-value 0 1)
+              :day (duckdb/epoch-days 1)
+              :nanos (duckdb/epoch-nanos 1001)}])))
+    (is (= [{:defaulted 99
+             :choice 7
+             :masked [1 nil 3]
+             :fixed [4 5 6]
+             :huge "42"
+             :uid "00000000-0000-0000-0000-000000000001"
+             :day "1970-01-02"
+             :nanos 1001}]
+           (jdbc/execute!
+            con
+            ["select defaulted,
+                     union_extract(choice, 'i') as choice,
+                     masked,
+                     fixed,
+                     huge::varchar as huge,
+                     uid::varchar as uid,
+                     day::varchar as day,
+                     epoch_ns(nanos) as nanos
+                from advanced"])))))
+
 (deftest appends-nested-map-rows
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute!

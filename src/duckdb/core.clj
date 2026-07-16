@@ -221,7 +221,165 @@
         session-init-sql (.get ^Map connection-session-init duck-con)]
     (initialize-connection! (.duplicate duck-con) session-init-sql)))
 
+(deftype ^:private DefaultValue [])
+(deftype ^:private UnionValue [tag value])
+(deftype ^:private ArrayValue [values validity])
+(deftype ^:private FixedSizeValue [values size])
+(deftype ^:private HugeIntValue [lower upper])
+(deftype ^:private UUIDValue [upper lower])
+(deftype ^:private TemporalValue [encoding value offset])
+
+(def ^:private default-value-instance (DefaultValue.))
+(def ^:private byte-array-class (class (byte-array 0)))
+(def ^:private byte-array-2d-class (class (make-array Byte/TYPE 0 0)))
+(def ^:private boolean-array-classes
+  #{(class (boolean-array 0)) (class (make-array Boolean/TYPE 0 0))})
+(def ^:private primitive-array-classes
+  (set (map class [(boolean-array 0)
+                   (byte-array 0)
+                   (char-array 0)
+                   (short-array 0)
+                   (int-array 0)
+                   (long-array 0)
+                   (float-array 0)
+                   (double-array 0)
+                   (make-array Boolean/TYPE 0 0)
+                   (make-array Byte/TYPE 0 0)
+                   (make-array Short/TYPE 0 0)
+                   (make-array Integer/TYPE 0 0)
+                   (make-array Long/TYPE 0 0)
+                   (make-array Float/TYPE 0 0)
+                   (make-array Double/TYPE 0 0)])))
+
+(defn default-value
+  "Returns an append value that uses the column's DEFAULT expression."
+  []
+  default-value-instance)
+
+(defn union-value
+  "Returns a UNION append value selecting tag and containing value."
+  [tag value]
+  (UnionValue. (identifier :union-tag tag) value))
+
+(defn array-value
+  "Returns a primitive-array append value with a boolean validity mask."
+  [values validity]
+  (when-not (and (contains? primitive-array-classes (class values))
+                 (contains? boolean-array-classes (class validity)))
+    (throw (ex-info "Array values require a primitive array and boolean[] validity mask"
+                    {:duckdb/error :invalid-array-value})))
+  (ArrayValue. values validity))
+
+(defn fixed-size-value
+  "Returns a fixed-size Iterable append value containing exactly size values."
+  [values size]
+  (when-not (instance? Iterable values)
+    (throw (ex-info "Fixed-size append values require an Iterable"
+                    {:duckdb/error :invalid-fixed-size-value
+                     :value-class (.getName (class values))})))
+  (FixedSizeValue. values (int size)))
+
+(defn hugeint-value
+  "Returns an explicitly encoded HUGEINT from unsigned lower and signed upper words."
+  [lower upper]
+  (HugeIntValue. (long lower) (long upper)))
+
+(defn uuid-value
+  "Returns an explicitly encoded UUID from upper and lower 64-bit words."
+  [upper lower]
+  (UUIDValue. (long upper) (long lower)))
+
+(defn epoch-days
+  "Returns an explicitly encoded DATE measured in days since the Unix epoch."
+  [days]
+  (TemporalValue. :epoch-days (long days) nil))
+
+(defn day-micros
+  "Returns an explicitly encoded TIME measured in microseconds since midnight.
+
+  With offset-seconds, encodes a TIME WITH TIME ZONE value."
+  ([micros]
+   (TemporalValue. :day-micros (long micros) nil))
+  ([micros offset-seconds]
+   (TemporalValue. :day-micros (long micros) (int offset-seconds))))
+
+(defn epoch-seconds
+  "Returns an explicitly encoded TIMESTAMP measured in Unix epoch seconds."
+  [seconds]
+  (TemporalValue. :epoch-seconds (long seconds) nil))
+
+(defn epoch-millis
+  "Returns an explicitly encoded TIMESTAMP measured in Unix epoch milliseconds."
+  [millis]
+  (TemporalValue. :epoch-millis (long millis) nil))
+
+(defn epoch-micros
+  "Returns an explicitly encoded TIMESTAMP measured in Unix epoch microseconds."
+  [micros]
+  (TemporalValue. :epoch-micros (long micros) nil))
+
+(defn epoch-nanos
+  "Returns an explicitly encoded TIMESTAMP measured in Unix epoch nanoseconds."
+  [nanos]
+  (TemporalValue. :epoch-nanos (long nanos) nil))
+
+(defn create-appender
+  "Creates a DuckDB appender. The caller must flush and close it.
+
+  Arity selects an unqualified table, schema/table, or catalog/schema/table."
+  (^DuckDBAppender [^Connection con table]
+   (let [^DuckDBConnection duck-con (duckdb-connection con)]
+     (.createAppender duck-con (identifier :table table))))
+  (^DuckDBAppender [^Connection con schema table]
+   (let [^DuckDBConnection duck-con (duckdb-connection con)]
+     (.createAppender duck-con
+                      (identifier :schema schema)
+                      (identifier :table table))))
+  (^DuckDBAppender [^Connection con catalog schema table]
+   (let [^DuckDBConnection duck-con (duckdb-connection con)]
+     (.createAppender duck-con
+                      (identifier :catalog catalog)
+                      (identifier :schema schema)
+                      (identifier :table table)))))
+
 (declare append-value!)
+
+(defn- append-primitive-array!
+  [^DuckDBAppender app type-name values validity]
+  (let [byte-array? (#{byte-array-class byte-array-2d-class} (class values))
+        blob? (= "BLOB" type-name)
+        method-name (if (and byte-array? (not blob?)) "appendByteArray" "append")
+        args (if validity [values validity] [values])]
+    (clojure.lang.Reflector/invokeInstanceMethod app method-name (to-array args))))
+
+(defn- validity->null-mask [validity]
+  (if (= (class validity) (class (boolean-array 0)))
+    (boolean-array (map not validity))
+    (into-array (class (boolean-array 0))
+                (map #(boolean-array (map not %)) validity))))
+
+(defn- append-temporal-value! [^DuckDBAppender app ^TemporalValue temporal]
+  (let [value (.-value temporal)]
+    (case (.-encoding temporal)
+      :epoch-days (.appendEpochDays app (int value))
+      :day-micros (if-some [offset (.-offset temporal)]
+                    (.appendDayMicros app (long value) (int offset))
+                    (.appendDayMicros app (long value)))
+      :epoch-seconds (.appendEpochSeconds app (long value))
+      :epoch-millis (.appendEpochMillis app (long value))
+      :epoch-micros (.appendEpochMicros app (long value))
+      :epoch-nanos (.appendEpochNanos app (long value)))))
+
+(defn- coerce-fixed-values [type-name values]
+  (let [coerce (cond
+                 (str/starts-with? type-name "TINYINT[") byte
+                 (str/starts-with? type-name "SMALLINT[") short
+                 (str/starts-with? type-name "INTEGER[") int
+                 (str/starts-with? type-name "BIGINT[") long
+                 (str/starts-with? type-name "FLOAT[") float
+                 (str/starts-with? type-name "DOUBLE[") double
+                 :else identity)]
+    (mapv #(if (nil? %) nil (coerce %)) values)))
 
 (defn- append-map-value [^DuckDBAppender app value]
   (let [m (LinkedHashMap.)]
@@ -255,6 +413,36 @@
 (defn- append-value! [^DuckDBAppender app type-name value]
   (cond
     (nil? value) (.appendNull app)
+    (instance? DefaultValue value) (.appendDefault app)
+    (instance? UnionValue value)
+    (let [^UnionValue union value]
+      (.beginUnion app (.-tag union))
+      (let [fields (types/struct-fields type-name)
+            field-types (types/struct-field-types type-name)
+            member-type (some (fn [[field field-type]]
+                                (when (.equalsIgnoreCase ^String field (.-tag union)) field-type))
+                              (map vector fields field-types))]
+        (append-value! app member-type (.-value union)))
+      (.endUnion app))
+    (instance? ArrayValue value)
+    (let [^ArrayValue array-value value]
+      (append-primitive-array! app type-name
+                               (.-values array-value)
+                               (validity->null-mask (.-validity array-value))))
+    (instance? FixedSizeValue value)
+    (let [^FixedSizeValue fixed value]
+      (.append app
+               ^Iterable (coerce-fixed-values type-name (.-values fixed))
+               (int (.-size fixed))))
+    (instance? HugeIntValue value)
+    (let [^HugeIntValue huge value]
+      (.appendHugeInt app (long (.-lower huge)) (long (.-upper huge))))
+    (instance? UUIDValue value)
+    (let [^UUIDValue uuid value]
+      (.appendUUID app (long (.-upper uuid)) (long (.-lower uuid))))
+    (instance? TemporalValue value) (append-temporal-value! app value)
+    (contains? primitive-array-classes (class value))
+    (append-primitive-array! app type-name value nil)
     (keyword? value) (.append app ^String (name value))
     (string? value) (.append app ^String value)
     (instance? Boolean value) (.append app ^Boolean value)
@@ -315,6 +503,39 @@
       (.flush app)
       (count rows))))
 
+(defn- qualified-target [target]
+  (let [{:keys [catalog schema table]} target]
+    (when-not table
+      (throw (ex-info "Qualified DuckDB append target requires :table"
+                      {:duckdb/error :invalid-append-target
+                       :target target})))
+    (when (and catalog (not schema))
+      (throw (ex-info "Catalog-qualified DuckDB append target requires :schema"
+                      {:duckdb/error :invalid-append-target
+                       :target target})))
+    {:catalog (some->> catalog (identifier :catalog))
+     :schema (some->> schema (identifier :schema))
+     :table (identifier :table table)}))
+
+(defn- qualified-name [{:keys [catalog schema table]}]
+  (str/join "." (remove nil? [catalog schema table])))
+
+(defn- append-qualified-with-connection! [^Connection con target rows]
+  (let [{:keys [catalog schema table] :as target} (qualified-target target)
+        columns (table-columns con (qualified-name target))]
+    (with-open [^DuckDBAppender app (if catalog
+                                     (create-appender con catalog schema table)
+                                     (if schema
+                                       (create-appender con schema table)
+                                       (create-appender con table)))]
+      (doseq [[row-index row] (map-indexed vector rows)]
+        (try
+          (append-row! app columns row)
+          (catch SQLException e
+            (throw (append-failed e row-index)))))
+      (.flush app)
+      (count rows))))
+
 (defn append!
   "Bulk-inserts map rows into table using DuckDB's Appender API.
 
@@ -322,9 +543,13 @@
   [ds table rows]
   (let [rows (vec rows)]
     (if (instance? Connection ds)
-      (append-with-connection! ds table rows)
+      (if (map? table)
+        (append-qualified-with-connection! ds table rows)
+        (append-with-connection! ds table rows))
       (with-open [con (jdbc/get-connection ds)]
-        (append-with-connection! con table rows)))))
+        (if (map? table)
+          (append-qualified-with-connection! con table rows)
+          (append-with-connection! con table rows))))))
 
 (defn attach!
   "Attaches the DuckDB database at path as alias."
