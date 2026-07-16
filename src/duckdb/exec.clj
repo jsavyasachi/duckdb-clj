@@ -14,7 +14,7 @@
            (org.duckdb DuckDBChunkedResult DuckDBColumnType
                        DuckDBConnection DuckDBDataChunkReader DuckDBDriver
                        DuckDBPreparedStatement DuckDBReadableVector
-                       DuckDBResultSetMetaData)))
+                       DuckDBResultSetMetaData ProfilerPrintFormat)))
 
 (set! *warn-on-reflection* true)
 
@@ -244,3 +244,23 @@
        (finally
          (.cancel scheduled false)
          (.shutdownNow executor))))))
+
+(defn profiling-information
+  "Returns native connection-local profiling output in format.
+
+  format is :query-tree, :json, :optimizer, :html, or :graphviz. Profiling
+  must first be enabled on the same Connection with DuckDB SQL configuration,
+  such as SET enable_profiling = 'no_output'."
+  [^Connection con format]
+  (let [print-format ({:query-tree ProfilerPrintFormat/QUERY_TREE
+                       :json ProfilerPrintFormat/JSON
+                       :optimizer ProfilerPrintFormat/QUERY_TREE_OPTIMIZER
+                       :html ProfilerPrintFormat/HTML
+                       :graphviz ProfilerPrintFormat/GRAPHVIZ}
+                      format)]
+    (when-not print-format
+      (throw (ex-info (str "Invalid DuckDB profiling format: " format)
+                      {:duckdb/error :invalid-profile-format
+                       :format format})))
+    (let [^DuckDBConnection duck-con (.unwrap con DuckDBConnection)]
+      (.getProfilingInformation duck-con print-format))))

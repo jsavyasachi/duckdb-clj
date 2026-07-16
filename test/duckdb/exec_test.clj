@@ -82,3 +82,16 @@
       (is (= #{:processed :total :percentage}
              (set (keys (:progress observation)))))
       (is (every? number? (vals (:progress observation)))))))
+
+(deftest returns-parseable-native-profiling-json
+  (let [ds (duckdb/memory-datasource)]
+    (with-open [con (jdbc/get-connection ds)]
+      (jdbc/execute! con ["set enable_profiling = 'no_output'"])
+      (jdbc/execute! con ["select sum(i) as total from range(10000) t(i)"])
+      (let [profile (exec/profiling-information con :json)]
+        (is (string? profile))
+        (is (not-empty profile))
+        (with-open [parser-con (jdbc/get-connection ds)]
+          (is (true? (:valid (jdbc/execute-one!
+                              parser-con
+                              ["select json_valid(?) as valid" profile])))))))))
