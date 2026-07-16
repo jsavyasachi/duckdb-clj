@@ -19,13 +19,13 @@ MAP, and ENUM columns round-trip as plain Clojure data, plus thin wrappers for
 deps.edn:
 
 ```clojure
-net.clojars.savya/duckdb-clj {:mvn/version "0.2.0"}
+net.clojars.savya/duckdb-clj {:mvn/version "0.3.0"}
 ```
 
 Leiningen:
 
 ```clojure
-[net.clojars.savya/duckdb-clj "0.2.0"]
+[net.clojars.savya/duckdb-clj "0.3.0"]
 ```
 
 Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
