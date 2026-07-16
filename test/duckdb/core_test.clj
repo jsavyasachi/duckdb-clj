@@ -255,6 +255,31 @@
                      epoch_ns(nanos) as nanos
                 from advanced"])))))
 
+(deftest appends-single-column-values
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table single_int (value integer)"])
+    (jdbc/execute! con ["create table single_timestamp (value timestamp)"])
+    (jdbc/execute! con ["create table single_decimal (value decimal(10, 2))"])
+    (jdbc/execute! con ["create table single_string (value varchar)"])
+    (jdbc/execute! con ["create table single_blob (value blob)"])
+    (is (= 3 (duckdb/append-single! con :main :single_int [1 2 3])))
+    (let [timestamp (java.time.LocalDateTime/of 2026 7 16 12 34 56)
+          decimal (bigdec "1234.50")]
+      (is (= 1 (duckdb/append-single! con :main :single_timestamp [timestamp])))
+      (is (= 1 (duckdb/append-single! con :main :single_decimal [decimal])))
+      (is (= 2 (duckdb/append-single! con :main :single_string ["duck" nil])))
+      (is (= 1 (duckdb/append-single! con :main :single_blob [(byte-array [0 1 -1])])))
+      (is (= [{:value 1} {:value 2} {:value 3}]
+             (jdbc/execute! con ["select * from single_int order by value"])))
+      (is (= [{:value "2026-07-16 12:34:56"}]
+             (jdbc/execute! con ["select value::varchar as value from single_timestamp"])))
+      (is (= [{:value decimal}]
+             (jdbc/execute! con ["select * from single_decimal"])))
+      (is (= [{:value "duck"} {:value nil}]
+             (jdbc/execute! con ["select * from single_string order by value nulls last"])))
+      (is (= [{:value "0001FF"}]
+             (jdbc/execute! con ["select hex(value) as value from single_blob"]))))))
+
 (deftest appends-nested-map-rows
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute!

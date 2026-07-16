@@ -10,7 +10,7 @@
            (java.util Collection Collections Date LinkedHashMap Map Properties UUID WeakHashMap)
            (java.util.logging Logger)
            (javax.sql DataSource)
-           (org.duckdb DuckDBAppender DuckDBConnection DuckDBDriver)))
+           (org.duckdb DuckDBAppender DuckDBConnection DuckDBDriver DuckDBSingleValueAppender)))
 
 (set! *warn-on-reflection* true)
 
@@ -342,6 +342,17 @@
                       (identifier :schema schema)
                       (identifier :table table)))))
 
+(defn create-single-value-appender
+  "Creates a single-column DuckDB appender for schema/table.
+
+  The caller must frame every value with beginRow/endRow, then flush and close
+  the appender."
+  ^DuckDBSingleValueAppender [^Connection con schema table]
+  (let [^DuckDBConnection duck-con (duckdb-connection con)]
+    (.createSingleValueAppender duck-con
+                                (identifier :schema schema)
+                                (identifier :table table))))
+
 (declare append-value!)
 
 (defn- append-primitive-array!
@@ -550,6 +561,63 @@
         (if (map? table)
           (append-qualified-with-connection! con table rows)
           (append-with-connection! con table rows))))))
+
+(defn- append-single-value!
+  [^DuckDBSingleValueAppender app type-name value]
+  (cond
+    (nil? value) (let [^String null-value nil] (.append app null-value))
+    (instance? Boolean value) (.append app (boolean value))
+    (instance? LocalDateTime value) (.appendLocalDateTime app value)
+    (instance? BigDecimal value) (.appendBigDecimal app value)
+    (= byte-array-class (class value)) (.append app ^bytes value)
+    (string? value) (.append app ^String value)
+    (and (= "TINYINT" type-name) (number? value)) (.append app (byte value))
+    (and (= "SMALLINT" type-name) (number? value)) (.append app (short value))
+    (and (= "INTEGER" type-name) (number? value)) (.append app (int value))
+    (and (= "BIGINT" type-name) (number? value)) (.append app (long value))
+    (and (= "FLOAT" type-name) (number? value)) (.append app (float value))
+    (and (= "DOUBLE" type-name) (number? value)) (.append app (double value))
+    (instance? Byte value) (.append app (byte value))
+    (instance? Short value) (.append app (short value))
+    (instance? Integer value) (.append app (int value))
+    (instance? Long value) (.append app (long value))
+    (instance? Float value) (.append app (float value))
+    (instance? Double value) (.append app (double value))
+    :else (throw (ex-info (str "Unsupported DuckDB single-value append value: "
+                               (pr-str value))
+                          {:duckdb/error :unsupported-single-append-value
+                           :value-class (.getName (class value))}))))
+
+(defn- append-single-with-connection!
+  [^Connection con schema table values]
+  (let [schema (identifier :schema schema)
+        table (identifier :table table)
+        columns (table-columns con (str schema "." table))]
+    (when-not (= 1 (count columns))
+      (throw (ex-info "Single-value appender requires a one-column table"
+                      {:duckdb/error :invalid-single-value-table
+                       :column-count (count columns)})))
+    (let [type-name (:type-name (first columns))]
+      (with-open [^DuckDBSingleValueAppender app
+                  (create-single-value-appender con schema table)]
+        (doseq [[row-index value] (map-indexed vector values)]
+          (try
+            (.beginRow app)
+            (append-single-value! app type-name value)
+            (.endRow app)
+            (catch SQLException e
+              (throw (append-failed e row-index)))))
+        (.flush app)
+        (count values)))))
+
+(defn append-single!
+  "Bulk-inserts values into a one-column schema/table using DuckDB's narrow appender."
+  [ds schema table values]
+  (let [values (vec values)]
+    (if (instance? Connection ds)
+      (append-single-with-connection! ds schema table values)
+      (with-open [con (jdbc/get-connection ds)]
+        (append-single-with-connection! con schema table values)))))
 
 (defn attach!
   "Attaches the DuckDB database at path as alias."
