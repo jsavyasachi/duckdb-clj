@@ -34,6 +34,31 @@
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (is (= [{:v 1}] (jdbc/execute! con ["select 1 as v"])))))
 
+(deftest configurable-datasource-properties
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "read-only.duckdb")]
+        (with-open [con (jdbc/get-connection (duckdb/file-datasource db-path))]
+          (jdbc/execute! con ["create table existing (id integer)"]))
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:read-only true}))]
+          (is (.isReadOnly con))
+          (is (thrown? SQLException
+                       (jdbc/execute! con ["create table forbidden (id integer)"])))))))
+  (with-open [con (jdbc/get-connection
+                   (duckdb/memory-datasource
+                    {:settings {:threads 2}
+                     :session-init-sql "set TimeZone = 'UTC'"
+                     :auto-commit false
+                     :user-agent "duckdb-clj-test"}))]
+    (is (false? (.getAutoCommit con)))
+    (is (= [{:threads 2 :timezone "UTC" :user_agent "duckdb-clj-test"}]
+           (jdbc/execute!
+            con
+            ["select current_setting('threads')::integer as threads,
+                     current_setting('TimeZone') as timezone,
+                     current_setting('custom_user_agent') as user_agent"])))))
+
 (deftest reads-parquet-with-coercion-and-options
   (with-temp-dir
     (fn [dir]

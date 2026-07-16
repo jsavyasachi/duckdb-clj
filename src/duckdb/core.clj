@@ -3,29 +3,147 @@
   (:require [clojure.string :as str]
             [duckdb.types :as types]
             [next.jdbc :as jdbc])
-  (:import (java.math BigDecimal BigInteger)
-           (java.sql Connection ResultSetMetaData SQLException Statement)
+  (:import (java.io PrintWriter)
+           (java.math BigDecimal BigInteger)
+           (java.sql Connection ResultSetMetaData SQLException SQLFeatureNotSupportedException Statement)
            (java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime)
-           (java.util Collection Date LinkedHashMap Map UUID)
-           (org.duckdb DuckDBAppender DuckDBConnection)))
+           (java.util Collection Collections Date LinkedHashMap Map Properties UUID WeakHashMap)
+           (java.util.logging Logger)
+           (javax.sql DataSource)
+           (org.duckdb DuckDBAppender DuckDBConnection DuckDBDriver)))
 
 (set! *warn-on-reflection* true)
 
 (def ^:private simple-option-pattern #"^[a-z0-9_]+$")
 (def ^:private identifier-pattern #"^[A-Za-z_][A-Za-z0-9_]*$")
+(def ^:private datasource-option-keys
+  #{:access-mode :auto-commit :read-only :session-init-sql :settings :user-agent})
+(def ^:private connection-session-init
+  (Collections/synchronizedMap (WeakHashMap.)))
+
+(defn- invalid-datasource-option [message data]
+  (throw (ex-info message (assoc data :duckdb/error :invalid-datasource-option))))
+
+(defn- property-name [k]
+  (let [property (str/replace (name k) "-" "_")]
+    (when-not (re-matches simple-option-pattern property)
+      (invalid-datasource-option
+       (str "Invalid DuckDB connection setting: " k)
+       {:setting k}))
+    property))
+
+(defn- property-value [value]
+  (cond
+    (true? value) "true"
+    (false? value) "false"
+    (keyword? value) (name value)
+    :else (str value)))
+
+(defn- access-mode-value [access-mode]
+  (case access-mode
+    :read-only DuckDBDriver/DUCKDB_ACCESS_MODE_READ_ONLY
+    :read-write DuckDBDriver/DUCKDB_ACCESS_MODE_READ_WRITE
+    :automatic DuckDBDriver/DUCKDB_ACCESS_MODE_AUTOMATIC
+    (let [value (str/upper-case
+                 (str/replace (if (or (keyword? access-mode) (symbol? access-mode))
+                                (name access-mode)
+                                (str access-mode))
+                              "-" "_"))]
+      (when-not (#{DuckDBDriver/DUCKDB_ACCESS_MODE_READ_ONLY
+                   DuckDBDriver/DUCKDB_ACCESS_MODE_READ_WRITE
+                   DuckDBDriver/DUCKDB_ACCESS_MODE_AUTOMATIC}
+                 value)
+        (invalid-datasource-option
+         (str "Invalid DuckDB access mode: " access-mode)
+         {:option :access-mode :value access-mode}))
+      value)))
+
+(defn- connection-properties [opts]
+  (let [unknown (seq (remove datasource-option-keys (keys opts)))]
+    (when unknown
+      (invalid-datasource-option
+       (str "Unknown DuckDB datasource option: " (first unknown))
+       {:option (first unknown)})))
+  (let [properties (Properties.)]
+    (doseq [[k v] (:settings opts)]
+      (.setProperty properties (property-name k) (property-value v)))
+    (when (contains? opts :read-only)
+      (.setProperty properties DuckDBDriver/DUCKDB_READONLY_PROPERTY
+                    (property-value (:read-only opts))))
+    (when (contains? opts :access-mode)
+      (.setProperty properties DuckDBDriver/DUCKDB_ACCESS_MODE_PROPERTY
+                    (access-mode-value (:access-mode opts))))
+    (when (contains? opts :auto-commit)
+      (.setProperty properties DuckDBDriver/JDBC_AUTO_COMMIT
+                    (property-value (:auto-commit opts))))
+    (when (contains? opts :user-agent)
+      (.setProperty properties DuckDBDriver/DUCKDB_USER_AGENT_PROPERTY
+                    (str (:user-agent opts))))
+    properties))
+
+(defn- initialize-connection! [^Connection con session-init-sql]
+  (when session-init-sql
+    (try
+      (with-open [^Statement stmt (.createStatement con)]
+        (.execute stmt ^String session-init-sql))
+      (.put ^Map connection-session-init con session-init-sql)
+      (catch Throwable cause
+        (.close con)
+        (throw cause))))
+  con)
+
+(defn datasource
+  "Returns a DuckDB datasource for jdbc-url using java.util.Properties.
+
+  Options are :read-only, :access-mode (:read-only, :read-write, or
+  :automatic), :settings, :session-init-sql, :auto-commit, and :user-agent."
+  ([jdbc-url]
+   (datasource jdbc-url nil))
+  ([jdbc-url opts]
+   (let [opts (or opts {})
+         properties (connection-properties opts)
+         session-init-sql (:session-init-sql opts)
+         driver (DuckDBDriver.)
+         connect (fn [extra-properties]
+                   (let [^Properties props (.clone ^Properties properties)]
+                     (doseq [[k v] extra-properties]
+                       (.setProperty ^Properties props k v))
+                     (initialize-connection!
+                      (.connect driver (str jdbc-url) ^Properties props)
+                      session-init-sql)))]
+     (reify DataSource
+       (getConnection [_]
+         (connect nil))
+       (getConnection [_ username password]
+         (connect {"user" (str username) "password" (str password)}))
+       (getLogWriter [_] nil)
+       (^void setLogWriter [_ ^PrintWriter _writer])
+       (getLoginTimeout [_] 0)
+       (^void setLoginTimeout [_ ^int _seconds])
+       (getParentLogger [_] (Logger/getGlobal))
+       (isWrapperFor [this iface] (.isInstance ^Class iface this))
+       (unwrap [this iface]
+         (if (.isInstance ^Class iface this)
+           (.cast ^Class iface this)
+           (throw (SQLFeatureNotSupportedException.
+                   (str "Cannot unwrap DuckDB datasource to " (.getName ^Class iface))))))))))
 
 (defn memory-datasource
   "Returns a next.jdbc datasource for an in-memory DuckDB database.
 
   Each connection from a memory datasource is a SEPARATE in-memory database;
   hold one connection with next.jdbc/get-connection for multi-statement work."
-  []
-  (jdbc/get-datasource "jdbc:duckdb:"))
+  ([]
+   (memory-datasource nil))
+  ([opts]
+   (datasource "jdbc:duckdb:" opts)))
 
 (defn file-datasource
   "Returns a next.jdbc datasource for a DuckDB database at path."
-  [path]
-  (jdbc/get-datasource (str "jdbc:duckdb:" path)))
+  ([path]
+   (file-datasource path nil))
+  ([path opts]
+   (datasource (str "jdbc:duckdb:" path) opts)))
 
 (defn- sql-string [value]
   (str "'" (str/replace (str value) "'" "''") "'"))
