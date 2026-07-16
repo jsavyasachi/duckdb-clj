@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [duckdb.types]
             [next.jdbc :as jdbc]
-            [next.jdbc.connection :as connection]
             [next.jdbc.prepare :as prep])
   (:import (java.math BigInteger)
            (java.sql Connection ParameterMetaData ResultSetMetaData)
@@ -18,14 +17,19 @@
 
 (set! *warn-on-reflection* true)
 
-(defn- jdbc-url [ds]
+(defn- jdbc-url ^String [ds]
   (cond
     (string? ds) ds
-    (map? ds) (connection/jdbc-url ds)
-    (instance? DataSource ds) (str ds)
     (instance? Connection ds)
     (throw (ex-info "Streaming mode must be enabled when the connection is opened"
                     {:duckdb/error :streaming-requires-datasource}))
+    ;; Any next.jdbc source (db-spec map or javax.sql.DataSource, including the
+    ;; reified DuckDB datasource from duckdb.core): open a throwaway connection
+    ;; and read its JDBC URL from metadata. Streaming needs its own connection
+    ;; because JDBC_STREAM_RESULTS is a connect-time property.
+    (or (map? ds) (instance? DataSource ds))
+    (with-open [con (jdbc/get-connection ds)]
+      (.getURL (.getMetaData con)))
     :else
     (throw (ex-info (str "Unsupported DuckDB streaming source: " (pr-str (class ds)))
                     {:duckdb/error :invalid-streaming-source
