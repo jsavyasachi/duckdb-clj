@@ -59,6 +59,34 @@
                      current_setting('TimeZone') as timezone,
                      current_setting('custom_user_agent') as user_agent"])))))
 
+(deftest duplicates-connections-to-the-same-database
+  (with-open [con (jdbc/get-connection
+                   (duckdb/memory-datasource
+                    {:session-init-sql "set TimeZone = 'Asia/Tokyo'"
+                     :auto-commit false}))]
+    (jdbc/execute! con ["create table shared (id integer)"])
+    (jdbc/execute! con ["insert into shared values (42)"])
+    (.commit con)
+    (with-open [^java.sql.Connection duplicate (duckdb/duplicate con)]
+      (is (false? (.getAutoCommit duplicate)))
+      (is (= [{:timezone "Asia/Tokyo"}]
+             (jdbc/execute! duplicate ["select current_setting('TimeZone') as timezone"])))
+      (is (= [{:id 42}] (jdbc/execute! duplicate ["select * from shared"]))))
+    (is (= [{:id 42}] (jdbc/execute! con ["select * from shared"])))))
+
+(deftest duplicate-inherits-read-only-mode
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (path-str dir "duplicate-read-only.duckdb")]
+        (with-open [con (jdbc/get-connection (duckdb/file-datasource db-path))]
+          (jdbc/execute! con ["create table existing (id integer)"]))
+        (with-open [con (jdbc/get-connection
+                         (duckdb/file-datasource db-path {:read-only true}))
+                    ^java.sql.Connection duplicate (duckdb/duplicate con)]
+          (is (.isReadOnly duplicate))
+          (is (thrown? SQLException
+                       (jdbc/execute! duplicate ["insert into existing values (1)"]))))))))
+
 (deftest reads-parquet-with-coercion-and-options
   (with-temp-dir
     (fn [dir]

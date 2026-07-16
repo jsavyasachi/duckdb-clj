@@ -211,6 +211,16 @@
 (defn- duckdb-connection [^Connection con]
   (.unwrap con DuckDBConnection))
 
+(defn duplicate
+  "Opens an independently closeable connection to the same DuckDB database.
+
+  The duplicate inherits read-only mode, session initialization SQL, and the
+  auto-commit default from con."
+  [^Connection con]
+  (let [^DuckDBConnection duck-con (duckdb-connection con)
+        session-init-sql (.get ^Map connection-session-init duck-con)]
+    (initialize-connection! (.duplicate duck-con) session-init-sql)))
+
 (declare append-value!)
 
 (defn- append-map-value [^DuckDBAppender app value]
