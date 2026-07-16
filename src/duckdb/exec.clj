@@ -8,6 +8,8 @@
   (:import (java.math BigInteger)
            (java.sql Connection ParameterMetaData ResultSetMetaData)
            (java.util Properties)
+           (java.util.concurrent Executors ScheduledExecutorService
+                                 ScheduledFuture ThreadFactory TimeUnit)
            (javax.sql DataSource)
            (org.duckdb DuckDBChunkedResult DuckDBColumnType
                        DuckDBConnection DuckDBDataChunkReader DuckDBDriver
@@ -184,3 +186,61 @@
                                value
                                (biginteger value)))
   stmt)
+
+(defn query-progress
+  "Returns the current connection-local progress reported for stmt."
+  [^DuckDBPreparedStatement stmt]
+  (let [progress (.getQueryProgress stmt)]
+    {:processed (.getRowsProcessed progress)
+     :total (.getTotalRowsToProcess progress)
+     :percentage (.getPercentage progress)}))
+
+(defn set-query-timeout!
+  "Sets stmt's JDBC query timeout in seconds and returns stmt."
+  [^DuckDBPreparedStatement stmt seconds]
+  (.setQueryTimeout stmt seconds)
+  stmt)
+
+(defn cancel!
+  "Cancels stmt if it is currently executing and returns stmt.
+
+  Call this from a different thread than the executing query."
+  [^DuckDBPreparedStatement stmt]
+  (.cancel stmt)
+  stmt)
+
+(defn- cancel-executor ^ScheduledExecutorService []
+  (Executors/newSingleThreadScheduledExecutor
+   (reify ThreadFactory
+     (newThread [_ runnable]
+       (doto (Thread. runnable "duckdb-exec-cancel")
+         (.setDaemon true))))))
+
+(defn execute-with-timeout!
+  "Executes stmt and cancels it from another thread after timeout-ms.
+
+  on-timeout, when supplied, receives stmt immediately before cancellation.
+  The callback can inspect query-progress. SQLExceptions from the interrupted
+  execution are propagated to the calling thread."
+  ([stmt timeout-ms]
+   (execute-with-timeout! stmt timeout-ms nil))
+  ([^DuckDBPreparedStatement stmt timeout-ms on-timeout]
+   (when (neg? timeout-ms)
+     (throw (ex-info (str "Timeout must be non-negative: " timeout-ms)
+                     {:duckdb/error :invalid-timeout
+                      :timeout-ms timeout-ms})))
+   (let [^ScheduledExecutorService executor (cancel-executor)
+         task (reify Runnable
+                (run [_]
+                  (try
+                    (when on-timeout
+                      (on-timeout stmt))
+                    (finally
+                      (cancel! stmt)))))
+         ^ScheduledFuture scheduled (.schedule executor task (long timeout-ms)
+                                                TimeUnit/MILLISECONDS)]
+     (try
+       (.execute stmt)
+       (finally
+         (.cancel scheduled false)
+         (.shutdownNow executor))))))

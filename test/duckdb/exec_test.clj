@@ -4,6 +4,7 @@
             [duckdb.exec :as exec]
             [next.jdbc :as jdbc])
   (:import (java.math BigInteger)
+           (java.sql SQLException)
            (org.duckdb DuckDBConnection DuckDBPreparedStatement)))
 
 (set! *warn-on-reflection* true)
@@ -53,3 +54,31 @@
     (is (= {:n (BigInteger. "-170141183460469231731687303715884105728")
             :label "second"}
            (jdbc/execute-one! stmt)))))
+
+(deftest cancels-long-running-queries-from-another-thread
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))
+              ^DuckDBPreparedStatement stmt
+              (exec/prepare con
+                            "select sum(a.i * b.i)
+                             from range(1000000) a(i), range(1000000) b(i)")]
+    (is (identical? stmt (exec/set-query-timeout! stmt 3)))
+    (is (= 3 (.getQueryTimeout stmt)))
+    (let [executing-thread (.getName (Thread/currentThread))
+          timeout-observation (promise)
+          error (try
+                  (exec/execute-with-timeout!
+                   stmt 50
+                   (fn [running-stmt]
+                     (deliver timeout-observation
+                              {:thread (.getName (Thread/currentThread))
+                               :progress (exec/query-progress running-stmt)})))
+                  nil
+                  (catch SQLException e e))
+          observation (deref timeout-observation 2000 ::timeout)]
+      (is (instance? SQLException error))
+      (is (re-find #"(?i)interrupt|cancel" (.getMessage ^SQLException error)))
+      (is (not= ::timeout observation))
+      (is (not= executing-thread (:thread observation)))
+      (is (= #{:processed :total :percentage}
+             (set (keys (:progress observation)))))
+      (is (every? number? (vals (:progress observation)))))))
