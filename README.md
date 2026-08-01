@@ -19,13 +19,13 @@ MAP, and ENUM columns round-trip as plain Clojure data, plus thin wrappers for
 deps.edn:
 
 ```clojure
-net.clojars.savya/duckdb-clj {:mvn/version "0.3.0"}
+net.clojars.savya/duckdb-clj {:mvn/version "0.3.1"}
 ```
 
 Leiningen:
 
 ```clojure
-[net.clojars.savya/duckdb-clj "0.3.0"]
+[net.clojars.savya/duckdb-clj "0.3.1"]
 ```
 
 Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
@@ -40,10 +40,10 @@ alias rather than the base dependency set:
 {:aliases
  {:arrow
   {:extra-deps
-   {org.apache.arrow/arrow-vector {:mvn/version "18.3.0"}
-    org.apache.arrow/arrow-memory-core {:mvn/version "18.3.0"}
-    org.apache.arrow/arrow-memory-unsafe {:mvn/version "18.3.0"}
-    org.apache.arrow/arrow-c-data {:mvn/version "18.3.0"}}
+   {org.apache.arrow/arrow-vector {:mvn/version "19.0.0"}
+    org.apache.arrow/arrow-memory-core {:mvn/version "19.0.0"}
+    org.apache.arrow/arrow-memory-unsafe {:mvn/version "19.0.0"}
+    org.apache.arrow/arrow-c-data {:mvn/version "19.0.0"}}
    :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"]}}}
 ```
 

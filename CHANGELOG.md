@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-08-01
+### Changed
+- Declare the optional Arrow integration dependencies in the pom so cljdoc can analyze the integration namespace. They remain non-transitive for consumers.
+
 ## [0.3.0] - 2026-07-16
 ### Added
 - Broad parity pass over the capabilities the DuckDB JDBC driver (1.5.4.0) exposes. All additions are backward compatible.
