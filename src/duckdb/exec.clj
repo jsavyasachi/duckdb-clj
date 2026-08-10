@@ -23,10 +23,9 @@
     (instance? Connection ds)
     (throw (ex-info "Streaming mode must be enabled when the connection is opened"
                     {:duckdb/error :streaming-requires-datasource}))
-    ;; Any next.jdbc source (db-spec map or javax.sql.DataSource, including the
-    ;; reified DuckDB datasource from duckdb.core): open a throwaway connection
-    ;; and read its JDBC URL from metadata. Streaming needs its own connection
-    ;; because JDBC_STREAM_RESULTS is a connect-time property.
+    ;; For a next.jdbc source, open a temporary connection and read its JDBC URL
+    ;; from metadata. Streaming needs its own connection because
+    ;; JDBC_STREAM_RESULTS is a connect-time property.
     (or (map? ds) (instance? DataSource ds))
     (with-open [con (jdbc/get-connection ds)]
       (.getURL (.getMetaData con)))
@@ -44,7 +43,7 @@
                         {:duckdb/error :invalid-streaming-source})))))
 
 (defn reduce-streaming
-  "Reduces a query using DuckDB's native streaming result mode.
+  "Reduces a query with DuckDB's native streaming result mode.
 
   sql is a next.jdbc SQL vector (or a SQL string). The Connection, statement,
   and ResultSet remain open until transduction finishes, including early
@@ -138,7 +137,7 @@
     (.prepare duck-con sql)))
 
 (defn parameter-metadata
-  "Returns ordered JDBC parameter-type metadata for stmt."
+  "Returns JDBC parameter-type metadata in order for stmt."
   [^DuckDBPreparedStatement stmt]
   (let [^ParameterMetaData metadata (.getParameterMetaData stmt)]
     (mapv (fn [index]
@@ -156,7 +155,7 @@
   (-> return-type str str/lower-case (str/replace "_" "-") keyword))
 
 (defn return-metadata
-  "Returns the native statement return type and ordered result columns."
+  "Returns the native statement return type and result columns in order."
   [^DuckDBPreparedStatement stmt]
   (let [^DuckDBResultSetMetaData metadata (.getMetaData stmt)
         ^ResultSetMetaData rsmeta metadata]
@@ -174,7 +173,7 @@
   stmt)
 
 (defn bind-parameters!
-  "Binds params in order on a reusable statement and returns stmt."
+  "Binds params in order on a reusable statement. Returns stmt."
   [^DuckDBPreparedStatement stmt params]
   (prep/set-parameters stmt params)
   stmt)
@@ -192,7 +191,7 @@
   stmt)
 
 (defn query-progress
-  "Returns the current connection-local progress reported for stmt."
+  "Returns the current connection-local progress for stmt."
   [^DuckDBPreparedStatement stmt]
   (let [progress (.getQueryProgress stmt)]
     {:processed (.getRowsProcessed progress)
@@ -206,7 +205,7 @@
   stmt)
 
 (defn cancel!
-  "Cancels stmt if it is currently executing and returns stmt.
+  "Cancels stmt if it executes. Returns stmt.
 
   Call this from a different thread than the executing query."
   [^DuckDBPreparedStatement stmt]
@@ -221,7 +220,7 @@
          (.setDaemon true))))))
 
 (defn execute-with-timeout!
-  "Executes stmt and cancels it from another thread after timeout-ms.
+  "Executes stmt. Cancels it from another thread after timeout-ms.
 
   on-timeout, when supplied, receives stmt immediately before cancellation.
   The callback can inspect query-progress. SQLExceptions from the interrupted

@@ -4,9 +4,9 @@
 [![cljdoc](https://cljdoc.org/badge/net.clojars.savya/duckdb-clj)](https://cljdoc.org/d/net.clojars.savya/duckdb-clj/CURRENT)
 [![test](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml)
 
-DuckDB type coercion and helpers for Clojure over `next.jdbc`: LIST, STRUCT,
-MAP, and ENUM columns round-trip as plain Clojure data, plus thin wrappers for
-`read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
+DuckDB type coercion and helpers for Clojure over `next.jdbc`. LIST, STRUCT,
+MAP, and ENUM columns round-trip as plain Clojure data. The library also has
+wrappers for `read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
 
 ## Stack
 
@@ -28,13 +28,13 @@ Leiningen:
 [net.clojars.savya/duckdb-clj "0.3.1"]
 ```
 
-Bundles `org.duckdb/duckdb_jdbc` (the embedded database - no server) and
-extends `next.jdbc`'s protocols on load.
+The library bundles `org.duckdb/duckdb_jdbc`, an embedded database with no
+server. It extends `next.jdbc` protocols on load.
 
 ### Arrow
 
-`duckdb.arrow` is optional. Add mutually compatible Apache Arrow modules in an
-alias rather than the base dependency set:
+`duckdb.arrow` is optional. Add compatible Apache Arrow modules in an alias,
+not the base dependency set:
 
 ```clojure
 {:aliases
@@ -47,8 +47,8 @@ alias rather than the base dependency set:
    :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"]}}}
 ```
 
-Run with the alias, for example `clojure -M:arrow`. The `--add-opens` runtime
-flag is required for Arrow off-heap memory access on JDK 16 and newer.
+Run with the alias, for example `clojure -M:arrow`. Arrow off-heap memory access
+on JDK 16 and later requires the `--add-opens` runtime flag.
 
 ## Usage
 
@@ -84,7 +84,7 @@ flag is required for Arrow off-heap memory access on JDK 16 and newer.
 ;;      :mood "happy"}]
 ```
 
-Nesting works in both directions (LIST of STRUCT, STRUCT containing MAP, ...).
+Nesting works in both directions: LIST of STRUCT and STRUCT with MAP.
 ENUM columns read as strings; write keywords or strings as parameters.
 
 ### Bulk append
@@ -109,9 +109,9 @@ ENUM columns read as strings; write keywords or strings as parameters.
 ;; => 2
 ```
 
-`append!` takes rows as maps and appends values in the table's declared column
-order, not the map's iteration order. It uses DuckDB's Appender API and supports
-common scalar values plus nested LIST and STRUCT values.
+`append!` takes rows as maps. It appends values in the table's declared column
+order, not map iteration order. It uses DuckDB's Appender API. It supports
+common scalar values and nested LIST and STRUCT values.
 
 ### File helpers
 
@@ -129,29 +129,26 @@ common scalar values plus nested LIST and STRUCT values.
 (duck/duckdb-version ds)
 ```
 
-Option maps render to DuckDB named arguments (`{:union-by-name true}` →
-`union_by_name = true`); option names are validated as identifiers and string
-values are SQL-escaped.
+Option maps render as DuckDB named arguments (`{:union-by-name true}` →
+`union_by_name = true`). The library validates option names as identifiers and
+SQL-escapes string values.
 
 ## Semantics worth knowing
 
 - **STRUCT** fields are keywordized on read (`{:name "alice"}`); on write, the
-  Clojure map is bound positionally against the column's declared field order,
-  and an absent field key throws (`:duckdb/error :missing-struct-field`) -
-  explicit `nil` values are fine.
+  Clojure map binds positionally to the column's declared field order. An absent
+  field key throws (`:duckdb/error :missing-struct-field`). Explicit `nil` values are valid.
 - **MAP** keys are *not* keywordized (DuckDB map keys can be any type, e.g.
   `MAP(INT, VARCHAR)` reads back as `{1 "x"}`).
-- **In-memory databases**: each connection to a `(memory-datasource)` is a
-  separate database. Hold one connection (`jdbc/get-connection`) for
+- **In-memory databases**: Each connection to a `(memory-datasource)` is a
+  separate database. Use one connection (`jdbc/get-connection`) for
   multi-statement work.
-- Result keys are unqualified (`:id`, not `:events/id`) - DuckDB's JDBC driver
+- Result keys are unqualified (`:id`, not `:events/id`). DuckDB's JDBC driver
   does not report table names for result columns.
 - The `java.util.Map` `ReadableColumn` extension is process-global across all
-  `next.jdbc` usage in the JVM (it converts Java maps to Clojure maps - benign,
-  but noted).
-- **Bulk transfer**: `append!` uses DuckDB's Appender API for faster row ingest
-  from Clojure maps. For bulk columnar extracts and very large analytical
-  transfers, use
+  `next.jdbc` usage in the JVM. It converts Java maps to Clojure maps.
+- **Bulk transfer**: `append!` uses DuckDB's Appender API for row ingest from
+  Clojure maps. For bulk columnar extracts and large analytical transfers, use
   [tmducken](https://github.com/techascent/tmducken) (DuckDB C API ->
   tech.ml.dataset) or DuckDB's
   [ADBC](https://duckdb.org/docs/current/clients/adbc) client instead.
@@ -166,7 +163,7 @@ Errors are `ex-info` maps keyed `:duckdb/error`
 clojure -M:test
 ```
 
-Everything runs against in-memory DuckDB - no services, nothing to download.
+All tests run against in-memory DuckDB. No services are needed.
 
 ## License
 

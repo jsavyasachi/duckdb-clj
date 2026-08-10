@@ -1,5 +1,5 @@
 (ns duckdb.arrow
-  "Optional Apache Arrow C Data interface helpers for DuckDB JDBC."
+  "Optional Apache Arrow C Data helpers for DuckDB JDBC."
   (:require [next.jdbc :as jdbc])
   (:import (java.sql Connection ResultSet)
            (java.util.concurrent.atomic AtomicBoolean)
@@ -64,11 +64,11 @@
            (.close reader (boolean close-source?))))))))
 
 (defn arrow-export
-  "Runs query and returns a closeable ArrowReader backed by allocator.
+  "Runs query and returns a closeable ArrowReader that uses allocator.
 
-  query is a next.jdbc SQL/parameter vector or a SQL string. JDBC statement and
-  result-set resources are closed before this function returns. The caller owns
-  both the returned reader and allocator and must close the reader first."
+  query is a next.jdbc SQL/parameter vector or a SQL string. This function
+  closes JDBC statement and result-set resources before it returns. The caller
+  owns the reader and allocator. The caller must close the reader first."
   (^ArrowReader [^Connection con query ^BufferAllocator allocator]
    (arrow-export con query allocator default-batch-size))
   (^ArrowReader [^Connection con query ^BufferAllocator allocator batch-size]
@@ -81,7 +81,7 @@
         allocator)))))
 
 (defn with-arrow-reader
-  "Calls f with an ArrowReader for query and always closes the reader afterward.
+  "Calls f with an ArrowReader for query. It always closes the reader after f.
 
   The caller owns allocator and must keep it open for the duration of f."
   ([^Connection con query ^BufferAllocator allocator f]
@@ -91,15 +91,15 @@
      (f reader))))
 
 (defn register-arrow!
-  "Registers an Arrow C Data stream as table-name and returns its lifetime handle.
+  "Registers an Arrow C Data stream as table-name. Returns its lifetime handle.
 
-  Keep the returned ArrowArrayStream open, along with its allocator and source
-  ArrowReader, until DuckDB has finished the query that consumes the replacement
-  scan. Closing any of them early invalidates the zero-copy C Data buffers.
+  Keep the returned ArrowArrayStream, its allocator, and its source ArrowReader
+  open until DuckDB finishes the query that uses the replacement scan. Closing
+  any of them early invalidates the zero-copy C Data buffers.
 
-  The four-argument form creates and exports an ArrowArrayStream from reader. It
-  closes the stream if export or registration fails. The three-argument form
-  registers an existing stream whose lifetime remains the caller's responsibility."
+  The four-argument form creates and exports an ArrowArrayStream from reader.
+  It closes the stream if export or registration fails. The three-argument form
+  registers an existing stream. The caller owns its lifetime."
   (^ArrowArrayStream [^Connection con table ^ArrowArrayStream stream]
    (.registerArrowStream ^DuckDBConnection (duckdb-connection con)
                          (table-name table)

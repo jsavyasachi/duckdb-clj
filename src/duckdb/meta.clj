@@ -245,7 +245,7 @@
      :user-name (.getUserName metadata)}))
 
 (defn capabilities
-  "Returns commonly useful JDBC capability flags reported by DuckDB."
+  "Returns JDBC capability flags reported by DuckDB."
   [^Connection con]
   (let [^DatabaseMetaData metadata (database-metadata con)]
     {:transactions (.supportsTransactions metadata)

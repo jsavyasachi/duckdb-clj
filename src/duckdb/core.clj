@@ -1,5 +1,5 @@
 (ns duckdb.core
-  "Convenience helpers for DuckDB-specific next.jdbc operations."
+  "Helpers for DuckDB-specific next.jdbc operations."
   (:require [clojure.string :as str]
             [duckdb.types :as types]
             [next.jdbc :as jdbc])
@@ -97,7 +97,7 @@
   con)
 
 (defn datasource
-  "Returns a DuckDB datasource for jdbc-url using java.util.Properties.
+  "Returns a DuckDB datasource for jdbc-url. Uses java.util.Properties.
 
   Options are :read-only, :access-mode (:read-only, :read-write, or
   :automatic), :settings, :session-init-sql, :auto-commit, :user-agent, and
@@ -136,8 +136,8 @@
 (defn memory-datasource
   "Returns a next.jdbc datasource for an in-memory DuckDB database.
 
-  Each connection from a memory datasource is a SEPARATE in-memory database;
-  hold one connection with next.jdbc/get-connection for multi-statement work."
+  Each memory datasource connection is a SEPARATE in-memory database. Use one
+  connection with next.jdbc/get-connection for multi-statement work."
   ([]
    (memory-datasource nil))
   ([opts]
@@ -262,12 +262,12 @@
                    (make-array Double/TYPE 0 0)])))
 
 (defn default-value
-  "Returns an append value that uses the column's DEFAULT expression."
+  "Returns an append value that uses the DEFAULT expression of the column."
   []
   default-value-instance)
 
 (defn union-value
-  "Returns a UNION append value selecting tag and containing value."
+  "Returns a UNION append value that selects tag and contains value."
   [tag value]
   (UnionValue. (identifier :union-tag tag) value))
 
@@ -353,7 +353,7 @@
                       (identifier :table table)))))
 
 (defn create-single-value-appender
-  "Creates a single-column DuckDB appender for schema/table.
+  "Creates a DuckDB appender for a single-column schema/table.
 
   The caller must frame every value with beginRow/endRow, then flush and close
   the appender."
@@ -558,7 +558,7 @@
       (count rows))))
 
 (defn append!
-  "Bulk-inserts map rows into table using DuckDB's Appender API.
+  "Bulk inserts map rows into table with DuckDB's Appender API.
 
   Row values are appended in the table's declared column order, not map order."
   [ds table rows]
@@ -621,7 +621,7 @@
         (count values)))))
 
 (defn append-single!
-  "Bulk-inserts values into a one-column schema/table using DuckDB's narrow appender."
+  "Bulk inserts values into a one-column schema/table with DuckDB's narrow appender."
   [ds schema table values]
   (let [values (vec values)]
     (if (instance? Connection ds)
@@ -658,25 +658,25 @@
   (jdbc/execute! ds [(str "load " (identifier :name name))]))
 
 (defn release-db!
-  "Releases the database pinned for jdbc-url.
+  "Releases the database pinned to jdbc-url.
 
-  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
-  Never place this in automatic connection or datasource cleanup."
+  PROCESS-GLOBAL: Call only as an explicit application lifecycle operation.
+  Do not use this in automatic connection or datasource cleanup."
   [jdbc-url]
   (DuckDBDriver/releaseDB (str jdbc-url)))
 
 (defn shutdown-cancel-scheduler!
   "Shuts down DuckDB JDBC's query-cancellation scheduler.
 
-  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
-  Never place this in automatic connection or datasource cleanup."
+  PROCESS-GLOBAL: Call only as an explicit application lifecycle operation.
+  Do not use this in automatic connection or datasource cleanup."
   []
   (DuckDBDriver/shutdownQueryCancelScheduler))
 
 (defn registered-functions
   "Returns DuckDB JDBC's process-global registered UDFs as maps.
 
-  PROCESS-GLOBAL: this inspects the registry shared by every DuckDB connection
+  PROCESS-GLOBAL: This inspects the registry shared by every DuckDB connection
   in the JVM."
   []
   (mapv (fn [^DuckDBFunctions$RegisteredFunction function]
@@ -687,8 +687,8 @@
 (defn clear-functions-registry!
   "Clears DuckDB JDBC's registered UDF metadata.
 
-  PROCESS-GLOBAL: call only as an explicit application lifecycle operation.
-  Never place this in automatic connection or datasource cleanup."
+  PROCESS-GLOBAL: Call only as an explicit application lifecycle operation.
+  Do not use this in automatic connection or datasource cleanup."
   []
   (DuckDBDriver/clearFunctionsRegistry))
 

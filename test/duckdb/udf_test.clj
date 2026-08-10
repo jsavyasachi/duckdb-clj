@@ -15,7 +15,7 @@
 
 (deftest registers-scalar-functions
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
-    (testing "typed integer function with NULL propagation"
+    (testing "typed integer function propagates NULL"
       (let [function-name (unique-name "double_int")
             calls (atom 0)]
         (udf/register-scalar!

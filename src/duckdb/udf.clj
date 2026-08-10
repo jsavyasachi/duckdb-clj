@@ -1,9 +1,8 @@
 (ns duckdb.udf
-  "Register-only helpers for Java-backed DuckDB scalar and table functions.
+  "Helpers that only register Java-backed DuckDB scalar and table functions.
 
-  Registrations are process-global. duckdb_jdbc 1.5.4.0 does not expose a
-  working way to remove them, so registered callbacks live for the JVM's
-  lifetime."
+  Registrations are process-global. duckdb_jdbc 1.5.4.0 has no way to remove
+  them. Registered callbacks live for the lifetime of the JVM."
   (:require [next.jdbc :as jdbc])
   (:import (java.math BigDecimal BigInteger)
            (java.sql Connection Date Timestamp)
@@ -168,7 +167,7 @@
           (throw (callback-error name cause)))))))
 
 (defn register-scalar!
-  "Registers f as a typed scalar function and returns the driver's registration.
+  "Registers f as a typed scalar function. Returns the driver registration.
 
   Options:
   - :parameters is a vector of Class, DuckDBColumnType, or DuckDBLogicalType.
@@ -176,10 +175,9 @@
   - :null-handling is :special (default) or :null-in-null-out.
   - :volatility is :immutable (default) or :volatile.
 
-  Registrations are PROCESS-GLOBAL and, in duckdb_jdbc 1.5.4.0, CANNOT be removed
-  for the lifetime of the JVM because the driver exposes no working
-  deregistration. Use stable, unique names and avoid re-registering the same
-  name in one JVM."
+  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.4.0 registrations CANNOT be removed for the lifetime of the JVM.
+  The driver has no deregistration. Use stable, unique names. Do not register
+  the same name again in one JVM."
   [connectable name f {:keys [parameters return-type null-handling volatility]
                        :or {parameters []
                             null-handling :special
@@ -316,22 +314,21 @@
         row-count))))
 
 (defn register-table!
-  "Registers a JVM-backed table function and returns the driver's registration.
+  "Registers a JVM-backed table function. Returns the driver registration.
 
   Options:
   - :parameters and :named-parameters contain DuckDB type descriptors.
   - :columns is a vector of [name type] result columns.
   - :cardinality is an estimated row count or {:rows n :exact? boolean}.
-  - :bind receives converted positional and named parameters and returns bind data.
+  - :bind receives converted positional and named parameters. It returns bind data.
   - :init receives bind data and returns per-query state.
   - :local-init optionally returns per-thread state.
-  - :apply receives bind/state data, capacity, and writable :vectors, and returns
+  - :apply receives bind/state data, capacity, and writable :vectors. It returns
     the number of rows written. :max-threads is optional.
 
-  Registrations are PROCESS-GLOBAL and, in duckdb_jdbc 1.5.4.0, CANNOT be removed
-  for the lifetime of the JVM because the driver exposes no working
-  deregistration. Use stable, unique names and avoid re-registering the same
-  name in one JVM."
+  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.4.0 registrations CANNOT be removed for the lifetime of the JVM.
+  The driver has no deregistration. Use stable, unique names. Do not register
+  the same name again in one JVM."
   [connectable name {:keys [parameters named-parameters]
                      :or {parameters [] named-parameters {}}
                      :as opts}]

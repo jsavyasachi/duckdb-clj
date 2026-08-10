@@ -1,24 +1,23 @@
 # Contributing to duckdb-clj
 
-Thanks for your interest in improving `duckdb-clj`. Bug reports, fixes, and
-focused feature contributions are all welcome.
+Report bugs, send fixes, and send focused feature contributions.
 
 ## Before you start
 
-- For anything beyond a trivial fix, **open an issue first** so we can agree on
-  the approach before you invest time.
+- For a non-trivial fix, **open an issue first**. This lets us agree on the
+  approach before you spend time.
 - Check existing issues and pull requests to avoid duplicate work.
 
 ## Project layout
 
-A single `deps.edn` library. Source under `src/duckdb/`:
+This is one `deps.edn` library. Source files are under `src/duckdb/`:
 
 | Namespace | Purpose |
 |---|---|
 | `duckdb.types` | next.jdbc `ReadableColumn` / `SettableParameter` extensions for LIST / STRUCT / MAP |
 | `duckdb.core` | datasource constructors, `read-parquet` / `read-csv`, `attach!`, extensions |
 
-Code must stay reflection-free (`*warn-on-reflection*` is on). Expected
+Code must have no reflection warnings (`*warn-on-reflection*` is on). Expected
 failures throw `ex-info` with a `:duckdb/error` key.
 
 ## Building and testing
@@ -32,14 +31,13 @@ clojure -M:1.12:test       # Clojure 1.12 matrix cell
 clojure -T:build jar       # build a jar
 ```
 
-The whole suite runs against in-memory DuckDB; there is nothing to download
-and no services to start.
+The full suite runs against in-memory DuckDB. No services are needed.
 
-The bar for a mergeable change:
+Requirements for a mergeable change:
 
 - **Tests first.** Add or update tests for the behavior you change; for a bug
   fix, include a regression test that fails before your fix and passes after.
-- **Green build.** `clojure -M:test` passes and `src` compiles with **zero**
+- **Passing build.** `clojure -M:test` passes and `src` compiles with **zero**
   reflection warnings (`*warn-on-reflection*` is on).
 - **No scope creep.** Keep each pull request to one logical change.
 
@@ -47,7 +45,7 @@ The bar for a mergeable change:
 
 - Follow [Conventional Commits](https://www.conventionalcommits.org/)
   (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` …).
-- Keep the subject in the imperative mood and under ~72 characters.
+- Keep the subject in the imperative mood and under 72 characters.
 - Update `CHANGES.md` when your change is user-visible.
 - Rebase on the latest `main` before opening the pull request.
 

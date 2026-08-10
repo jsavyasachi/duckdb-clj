@@ -1,8 +1,8 @@
 (ns duckdb.types
-  "Read-side conversions for DuckDB JDBC nested values.
+  "Read conversions for DuckDB JDBC nested values.
 
-  Extending java.util.Map is process-global across all next.jdbc usage in this
-  JVM. For DuckDB this is benign: Java maps are converted to Clojure maps."
+  Extending java.util.Map is process-global across all next.jdbc use in this
+  JVM. For DuckDB, this does not cause a problem: Java maps convert to Clojure maps."
   (:require [clojure.string :as str]
             [next.jdbc.prepare :as prep]
             [next.jdbc.result-set :as rs])

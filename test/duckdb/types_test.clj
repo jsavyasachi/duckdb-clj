@@ -46,7 +46,7 @@
           'plain',
           TIMESTAMP '2024-01-02 03:04:05')"])
       (let [row (first (jdbc/execute! con ["select * from t"]))]
-        (testing "next.jdbc default keys for DuckDB are unqualified"
+        (testing "next.jdbc default DuckDB keys are unqualified"
           (is (= #{:id :tags :info :meta :int_meta :nested :people :no_tags
                    :no_info :no_meta :empty_tags :label :happened_at}
                  (set (keys row)))))
@@ -55,7 +55,7 @@
           (is (= {:name "alice" :age 30} (:info row)))
           (is (= {"k" 1} (:meta row)))
           (is (= {1 "x"} (:int_meta row))))
-        (testing "nested DuckDB values are converted recursively"
+        (testing "nested DuckDB values convert recursively"
           (is (= {:xs [1 2] :m {"k" 7}} (:nested row)))
           (is (= [{:name "bob" :age 40} {:name "carol" :age 41}]
                  (:people row))))
@@ -64,7 +64,7 @@
           (is (nil? (:no_info row)))
           (is (nil? (:no_meta row)))
           (is (= [] (:empty_tags row))))
-        (testing "scalars are unchanged by duckdb.types"
+        (testing "duckdb.types does not change scalars"
           (is (= 1 (:id row)))
           (is (= "plain" (:label row)))
           (is (inst? (:happened_at row))))))))
@@ -85,7 +85,7 @@
           nested struct(xs int[], m map(varchar, int)),
           quoted struct(\"name\" varchar, \"order\" int),
           empty_tags varchar[])"])
-      (testing "missing struct fields fail before binding"
+      (testing "missing STRUCT fields fail before binding"
         (let [e (is (thrown-with-msg?
                      clojure.lang.ExceptionInfo
                      #"Missing STRUCT field"
@@ -125,7 +125,7 @@
           (is (= [{:name "a" :age 1} {:name "b" :age 2}]
                  (:people row)))
           (is (= {:xs [1 2] :m {"k" 9}} (:nested row)))))
-      (testing "untyped parameters fall back to raw next.jdbc binding"
+      (testing "untyped parameters use raw next.jdbc binding"
         (is (= {:v "plain"} (first (jdbc/execute! con ["select ? as v" "plain"]))))))))
 
 (deftest writes-enum-values-from-keywords-and-strings
@@ -135,11 +135,11 @@
       (jdbc/execute! con ["create table enum_values (id int, mood mood)"])
       (jdbc/execute! con ["insert into enum_values values (?, ?)" 1 :happy])
       (jdbc/execute! con ["insert into enum_values values (?, ?)" 2 "ok"])
-      (testing "ENUM values read back as plain strings"
+      (testing "ENUM values read as plain strings"
         (is (= [{:id 1 :mood "happy"}
                 {:id 2 :mood "ok"}]
                (jdbc/execute! con ["select * from enum_values order by id"]))))
-      (testing "invalid enum values surface DuckDB's native input error"
+      (testing "invalid ENUM values return DuckDB native input errors"
         (is (thrown-with-msg?
              java.sql.SQLException
              #"Could not convert string|Invalid Input Error|Conversion Error"
