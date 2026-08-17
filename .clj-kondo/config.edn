@@ -1,0 +1,10 @@
+{:linters
+ {;; Suppress the pre-existing DatabaseMetaData interop return-hint style warning;
+  ;; moving it requires judging the Java interop declaration.
+  :non-arg-vec-return-type-hint {:level :off}
+
+  ;; Suppress pre-existing unused test fixture bindings without changing test setup.
+  :unused-binding {:level :off}
+
+  ;; Suppress pre-existing unused clojure.test refers without modifying test code.
+  :unused-referred-var {:level :off}}}
