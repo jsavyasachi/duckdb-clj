@@ -117,26 +117,25 @@
                        (.setProperty ^Properties props k v))
                      (initialize-connection!
                       (.connect driver (str jdbc-url) ^Properties props)
-                      session-init-sql)))]
-     (let [source
-           (reify DataSource
-             (getConnection [_]
-               (connect nil))
-             (getConnection [_ username password]
-               (connect {"user" (str username) "password" (str password)}))
-             (getLogWriter [_] nil)
-             (^void setLogWriter [_ ^PrintWriter _writer])
-             (getLoginTimeout [_] 0)
-             (^void setLoginTimeout [_ ^int _seconds])
-             (getParentLogger [_] (Logger/getGlobal))
-             (isWrapperFor [this iface] (.isInstance ^Class iface this))
-             (unwrap [this iface]
-               (if (.isInstance ^Class iface this)
-                 (.cast ^Class iface this)
-                 (throw (SQLFeatureNotSupportedException.
-                         (str "Cannot unwrap DuckDB datasource to " (.getName ^Class iface)))))))]
-       (.put ^Map datasource-connect source connect)
-       source))))
+                      session-init-sql)))
+         source (reify DataSource
+                  (getConnection [_]
+                    (connect nil))
+                  (getConnection [_ username password]
+                    (connect {"user" (str username) "password" (str password)}))
+                  (getLogWriter [_] nil)
+                  (^void setLogWriter [_ ^PrintWriter _writer])
+                  (getLoginTimeout [_] 0)
+                  (^void setLoginTimeout [_ ^int _seconds])
+                  (getParentLogger [_] (Logger/getGlobal))
+                  (isWrapperFor [this iface] (.isInstance ^Class iface this))
+                  (unwrap [this iface]
+                    (if (.isInstance ^Class iface this)
+                      (.cast ^Class iface this)
+                      (throw (SQLFeatureNotSupportedException.
+                              (str "Cannot unwrap DuckDB datasource to " (.getName ^Class iface)))))))]
+     (.put ^Map datasource-connect source connect)
+     source)))
 
 (defn open-streaming-connection
   "Opens ds with its configured properties plus DuckDB streaming results.
