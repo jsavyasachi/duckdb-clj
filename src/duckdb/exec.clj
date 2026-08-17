@@ -1,6 +1,7 @@
 (ns duckdb.exec
   "DuckDB-native query execution helpers over next.jdbc."
   (:require [clojure.string :as str]
+            [duckdb.core :as duckdb]
             [duckdb.types]
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prep])
@@ -37,7 +38,8 @@
 (defn- streaming-connection ^Connection [ds]
   (let [properties (doto (Properties.)
                      (.setProperty DuckDBDriver/JDBC_STREAM_RESULTS "true"))
-        con (.connect (DuckDBDriver.) (jdbc-url ds) properties)]
+        con (or (duckdb/open-streaming-connection ds)
+                (.connect (DuckDBDriver.) (jdbc-url ds) properties))]
     (or con
         (throw (ex-info "Source is not a DuckDB JDBC URL"
                         {:duckdb/error :invalid-streaming-source})))))

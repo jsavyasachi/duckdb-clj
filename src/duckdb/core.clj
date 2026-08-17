@@ -21,6 +21,8 @@
   #{:access-mode :auto-commit :pin-db :read-only :session-init-sql :settings :user-agent})
 (def ^:private connection-session-init
   (Collections/synchronizedMap (WeakHashMap.)))
+(def ^:private datasource-connect
+  (Collections/synchronizedMap (WeakHashMap.)))
 
 (defn- invalid-datasource-option [message data]
   (throw (ex-info message (assoc data :duckdb/error :invalid-datasource-option))))
@@ -116,22 +118,33 @@
                      (initialize-connection!
                       (.connect driver (str jdbc-url) ^Properties props)
                       session-init-sql)))]
-     (reify DataSource
-       (getConnection [_]
-         (connect nil))
-       (getConnection [_ username password]
-         (connect {"user" (str username) "password" (str password)}))
-       (getLogWriter [_] nil)
-       (^void setLogWriter [_ ^PrintWriter _writer])
-       (getLoginTimeout [_] 0)
-       (^void setLoginTimeout [_ ^int _seconds])
-       (getParentLogger [_] (Logger/getGlobal))
-       (isWrapperFor [this iface] (.isInstance ^Class iface this))
-       (unwrap [this iface]
-         (if (.isInstance ^Class iface this)
-           (.cast ^Class iface this)
-           (throw (SQLFeatureNotSupportedException.
-                   (str "Cannot unwrap DuckDB datasource to " (.getName ^Class iface))))))))))
+     (let [source
+           (reify DataSource
+             (getConnection [_]
+               (connect nil))
+             (getConnection [_ username password]
+               (connect {"user" (str username) "password" (str password)}))
+             (getLogWriter [_] nil)
+             (^void setLogWriter [_ ^PrintWriter _writer])
+             (getLoginTimeout [_] 0)
+             (^void setLoginTimeout [_ ^int _seconds])
+             (getParentLogger [_] (Logger/getGlobal))
+             (isWrapperFor [this iface] (.isInstance ^Class iface this))
+             (unwrap [this iface]
+               (if (.isInstance ^Class iface this)
+                 (.cast ^Class iface this)
+                 (throw (SQLFeatureNotSupportedException.
+                         (str "Cannot unwrap DuckDB datasource to " (.getName ^Class iface)))))))]
+       (.put ^Map datasource-connect source connect)
+       source))))
+
+(defn open-streaming-connection
+  "Opens ds with its configured properties plus DuckDB streaming results.
+
+  Returns nil for datasource implementations not created by `datasource`."
+  ^Connection [ds]
+  (when-let [connect (.get ^Map datasource-connect ds)]
+    (connect {DuckDBDriver/JDBC_STREAM_RESULTS "true"})))
 
 (defn memory-datasource
   "Returns a next.jdbc datasource for an in-memory DuckDB database.
@@ -497,6 +510,11 @@
                            :value-class (.getName (class value))}))))
 
 (defn- append-row! [^DuckDBAppender app columns row]
+  (doseq [{:keys [key]} columns]
+    (when-not (contains? row key)
+      (throw (ex-info (str "DuckDB append row is missing column " key)
+                      {:duckdb/error :missing-append-column
+                       :column key}))))
   (.beginRow app)
   (doseq [{:keys [key type-name]} columns]
     (append-value! app type-name (get row key)))

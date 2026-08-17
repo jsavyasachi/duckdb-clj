@@ -4,6 +4,7 @@
             [duckdb.exec :as exec]
             [next.jdbc :as jdbc])
   (:import (java.math BigInteger)
+           (java.nio.file Files Path)
            (java.sql SQLException)
            (org.duckdb DuckDBConnection DuckDBPreparedStatement)))
 
@@ -18,6 +19,32 @@
             (map :i)
             +
             0)))))
+
+(deftest streaming-reduction-preserves-read-only-datasource-mode
+  (let [^Path db-path (Files/createTempFile "duckdb-clj-streaming-" ".duckdb"
+                                            (make-array java.nio.file.attribute.FileAttribute 0))]
+    (try
+      (Files/deleteIfExists db-path)
+      (with-open [con (jdbc/get-connection (duckdb/file-datasource (str db-path)))]
+        (jdbc/execute! con ["create table protected (id integer)"]))
+      (is (thrown? SQLException
+                   (exec/reduce-streaming
+                    (duckdb/file-datasource (str db-path) {:read-only true})
+                    ["insert into protected values (1) returning id"]
+                    (map :id)
+                    conj
+                    [])))
+      (finally
+        (Files/deleteIfExists db-path)))))
+
+(deftest streaming-reduction-runs-datasource-session-initialization
+  (is (= ["Asia/Tokyo"]
+         (exec/reduce-streaming
+          (duckdb/memory-datasource {:session-init-sql "set TimeZone = 'Asia/Tokyo'"})
+          ["select current_setting('TimeZone') as timezone"]
+          (map :timezone)
+          conj
+          []))))
 
 (deftest reads-prepared-results-as-columnar-chunks
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]

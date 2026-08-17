@@ -201,6 +201,17 @@
             {:id 4 :name "dave" :score nil}]
            (jdbc/execute! con ["select * from append_values order by id"])))))
 
+(deftest appending-row-requires-every-table-column-key
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table append_required (id integer, value integer default 42)"])
+    (let [error (is (thrown? clojure.lang.ExceptionInfo
+                             (duckdb/append! con :append_required [{:id 1}])))]
+      (is (= :missing-append-column (:duckdb/error (ex-data error))))
+      (is (= :value (:column (ex-data error)))))
+    (is (= 1 (duckdb/append! con :append_required [{:id 2 :value nil}])))
+    (is (= [{:id 2 :value nil}]
+           (jdbc/execute! con ["select * from append_required order by id"])))))
+
 (deftest appends-to-catalog-and-schema-qualified-tables
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create schema analytics"])
