@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-17
+
+### Changed
+
+- `append-row!` now throws when a column is absent from the row map instead of
+  silently appending NULL over a SQL default or NOT NULL constraint. An
+  explicit `nil` still appends NULL.
+- `reduce-streaming` reuses the datasource's configured connection (read-only
+  mode, credentials, session-init SQL) instead of rebuilding it from the URL.
+
 ## [0.3.1] - 2026-08-01
 ### Changed
 - Declare the optional Arrow integration dependencies in the pom so cljdoc can analyze the integration namespace. They remain non-transitive for consumers.

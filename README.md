@@ -19,13 +19,13 @@ wrappers for `read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk
 deps.edn:
 
 ```clojure
-net.clojars.savya/duckdb-clj {:mvn/version "0.3.1"}
+net.clojars.savya/duckdb-clj {:mvn/version "0.4.0"}
 ```
 
 Leiningen:
 
 ```clojure
-[net.clojars.savya/duckdb-clj "0.3.1"]
+[net.clojars.savya/duckdb-clj "0.4.0"]
 ```
 
 The library bundles `org.duckdb/duckdb_jdbc`, an embedded database with no
