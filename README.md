@@ -129,6 +129,15 @@ common scalar values and nested LIST and STRUCT values.
 (duck/read-parquet ds "data/*.parquet" {:union-by-name true :file-row-number true})
 (duck/read-csv ds "data.csv" {:header true})
 
+;; COPY exports accept a table name, query string, or next.jdbc SQL vector.
+(duck/copy-to-parquet! ds :events "exports/events.parquet"
+                        {:compression :zstd :row-group-size 100000})
+(duck/copy-to-csv! ds ["select * from events where id > ?" 100]
+                    "exports/events.csv" {:header? true :delimiter ";"})
+(duck/copy-to-json! ds :events "exports/events.json" {:array? true})
+(duck/copy-to-parquet! ds :events "exports/events-by-region"
+                        {:partition-by [:region] :overwrite-or-ignore? true})
+
 (duck/attach! ds "other.db" "other")          ; then: select * from other.t
 (duck/attach! ds "other.db" "other" {:read-only true})
 (duck/detach! ds "other")
@@ -141,6 +150,15 @@ common scalar values and nested LIST and STRUCT values.
 Option maps render as DuckDB named arguments (`{:union-by-name true}` →
 `union_by_name = true`). The library validates option names as identifiers and
 SQL-escapes string values.
+
+`copy-to!` requires `:format` (`:parquet`, `:csv`, or `:json`); the
+`copy-to-parquet!`, `copy-to-csv!`, and `copy-to-json!` helpers set it for you.
+Output paths are SQL-escaped because DuckDB JDBC 1.5.5.1 does not accept a
+bound parameter in the `COPY ... TO` destination position. Query parameters in
+a next.jdbc SQL vector remain JDBC-bound. Parquet supports `:compression` and
+`:row-group-size`; CSV supports `:header?`, `:delimiter`, `:quote`, and
+`:escape`; JSON supports `:array?`. All formats support `:partition-by` and
+`:overwrite-or-ignore?` for partitioned output.
 
 ## Semantics worth knowing
 
