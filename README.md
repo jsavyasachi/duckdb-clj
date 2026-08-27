@@ -4,9 +4,18 @@
 [![cljdoc](https://cljdoc.org/badge/net.clojars.savya/duckdb-clj)](https://cljdoc.org/d/net.clojars.savya/duckdb-clj/CURRENT)
 [![test](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml)
 
-DuckDB type coercion and helpers for Clojure over `next.jdbc`. LIST, STRUCT,
-MAP, and ENUM columns round-trip as plain Clojure data. The library also has
-wrappers for `read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
+DuckDB type coercion and helpers for Clojure over `next.jdbc`. Chunked reads
+cover UUID, JSON, BLOB, TIME, ENUM, LIST, STRUCT, and MAP columns, converting
+them to ordinary Clojure and Java values. The library also has wrappers for
+`read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
+
+`read-chunks` and `reduce-chunks` use row-based JDBC `ResultSet` iteration,
+batched into pseudo-chunks, whenever a query result contains a UUID, JSON, BLOB,
+TIME, ENUM, LIST, STRUCT, or MAP column. DuckDB's Java driver
+(`duckdb_jdbc`) does not expose native chunk-vector accessors for these types,
+so this fallback applies to the entire result set, including other columns in a
+mixed-type query. Queries containing only the previously supported primitive
+types are unaffected and retain full native chunked performance.
 
 ## Stack
 

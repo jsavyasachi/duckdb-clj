@@ -4,11 +4,59 @@
             [duckdb.exec :as exec]
             [next.jdbc :as jdbc])
   (:import (java.math BigInteger)
+           (java.time LocalTime)
+           (java.util UUID)
            (java.nio.file Files Path)
            (java.sql SQLException)
            (org.duckdb DuckDBConnection DuckDBPreparedStatement)))
 
 (set! *warn-on-reflection* true)
+
+(defn- read-single-value [con sql]
+  (with-open [^DuckDBPreparedStatement stmt (exec/prepare con sql)]
+    (-> (exec/read-chunks stmt) first vals first first)))
+
+(deftest reads-uuid-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= (UUID/fromString "550e8400-e29b-41d4-a716-446655440000")
+           (read-single-value con
+                              "select '550e8400-e29b-41d4-a716-446655440000'::UUID as value")))))
+
+(deftest reads-json-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= "[1,2,3]"
+           (read-single-value con "select '[1,2,3]'::JSON as value")))))
+
+(deftest reads-blob-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= [97 98 99]
+           (seq (read-single-value con "select 'abc'::BLOB as value"))))))
+
+(deftest reads-time-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= (LocalTime/of 12 34 56 123456000)
+           (read-single-value con "select '12:34:56.123456'::TIME as value")))))
+
+(deftest reads-enum-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create type mood as enum ('sad', 'ok', 'happy')"])
+    (is (= "happy"
+           (read-single-value con "select 'happy'::mood as value")))))
+
+(deftest reads-list-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= [1 2 3]
+           (read-single-value con "select [1,2,3]::INT[] as value")))))
+
+(deftest reads-struct-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= {:a 1 :b "x"}
+           (read-single-value con "select {'a': 1, 'b': 'x'} as value")))))
+
+(deftest reads-map-values-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (is (= {"k" 1}
+           (read-single-value con "select MAP {'k': 1} as value")))))
 
 (deftest reduces-large-native-results-in-streaming-mode
   (let [ds (duckdb/memory-datasource)]

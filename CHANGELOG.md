@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-27
+
+### Added
+
+- `read-chunks` and `reduce-chunks` now support UUID, JSON, BLOB, TIME, ENUM,
+  LIST, STRUCT, and MAP result columns, including recursively converted nested
+  values.
+
+### Performance
+
+- Queries containing UUID, JSON, BLOB, TIME, ENUM, LIST, STRUCT, or MAP columns
+  use row-based JDBC `ResultSet` iteration batched into pseudo-chunks because
+  `duckdb_jdbc` does not expose native chunk-vector accessors for these types.
+  This fallback applies to the entire result set, while queries with only
+  previously supported primitive types retain native chunked performance.
+
 ## [0.4.0] - 2026-08-17
 
 ### Changed
