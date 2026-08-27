@@ -9,6 +9,14 @@ cover UUID, JSON, BLOB, TIME, ENUM, LIST, STRUCT, and MAP columns, converting
 them to ordinary Clojure and Java values. The library also has wrappers for
 `read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
 
+`read-chunks` and `reduce-chunks` use row-based JDBC `ResultSet` iteration,
+batched into pseudo-chunks, whenever a query result contains a UUID, JSON, BLOB,
+TIME, ENUM, LIST, STRUCT, or MAP column. DuckDB's Java driver
+(`duckdb_jdbc`) does not expose native chunk-vector accessors for these types,
+so this fallback applies to the entire result set, including other columns in a
+mixed-type query. Queries containing only the previously supported primitive
+types are unaffected and retain full native chunked performance.
+
 ## Stack
 
 <a href="https://clojure.org"><img src="https://img.shields.io/badge/Clojure-5881D8?style=flat&logo=clojure&logoColor=fff" alt="Clojure" /></a>
