@@ -4,9 +4,10 @@
 [![cljdoc](https://cljdoc.org/badge/net.clojars.savya/duckdb-clj)](https://cljdoc.org/d/net.clojars.savya/duckdb-clj/CURRENT)
 [![test](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml)
 
-DuckDB type coercion and helpers for Clojure over `next.jdbc`. LIST, STRUCT,
-MAP, and ENUM columns round-trip as plain Clojure data. The library also has
-wrappers for `read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
+DuckDB type coercion and helpers for Clojure over `next.jdbc`. Chunked reads
+cover UUID, JSON, BLOB, TIME, ENUM, LIST, STRUCT, and MAP columns, converting
+them to ordinary Clojure and Java values. The library also has wrappers for
+`read_parquet`, `read_csv`, `ATTACH`, extensions, and Appender bulk inserts.
 
 ## Stack
 

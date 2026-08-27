@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- `read-chunks` and `reduce-chunks` now support UUID, JSON, BLOB, TIME, ENUM,
+  LIST, STRUCT, and MAP result columns, including recursively converted nested
+  values.
+
 ## [0.4.0] - 2026-08-17
 
 ### Changed

@@ -6,12 +6,12 @@
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prep])
   (:import (java.math BigInteger)
-           (java.sql Connection ParameterMetaData ResultSetMetaData)
-           (java.util Properties)
+           (java.sql Array Connection ParameterMetaData ResultSet ResultSetMetaData Struct)
+           (java.util Map Properties)
            (java.util.concurrent Executors ScheduledExecutorService
                                  ScheduledFuture ThreadFactory TimeUnit)
            (javax.sql DataSource)
-           (org.duckdb DuckDBChunkedResult DuckDBColumnType
+           (org.duckdb DuckDBChunkedResult DuckDBColumnType JsonNode
                        DuckDBConnection DuckDBDataChunkReader DuckDBDriver
                        DuckDBPreparedStatement DuckDBReadableVector
                        DuckDBResultSetMetaData ProfilerPrintFormat)))
@@ -92,6 +92,70 @@
         DuckDBColumnType/TIMESTAMP_WITH_TIME_ZONE (.getOffsetDateTime vector row)
         (unsupported-chunk-type vector)))))
 
+(def ^:private native-chunk-type-names
+  #{"BOOLEAN" "TINYINT" "UTINYINT" "SMALLINT" "USMALLINT" "INTEGER"
+    "UINTEGER" "BIGINT" "UBIGINT" "HUGEINT" "UHUGEINT" "FLOAT"
+    "DOUBLE" "DECIMAL" "VARCHAR" "DATE" "TIMESTAMP" "TIMESTAMP_MS"
+    "TIMESTAMP_NS" "TIMESTAMP_S" "TIMESTAMP WITH TIME ZONE"})
+
+(defn- native-chunk-type? [^String type-name]
+  (contains? native-chunk-type-names (str/upper-case (str/trim type-name))))
+
+(declare jdbc-value->clj)
+
+(defn- jdbc-array->vector [^Array value]
+  (mapv jdbc-value->clj (seq (object-array (.getArray value)))))
+
+(defn- jdbc-struct->map [^Struct value]
+  (if (instance? org.duckdb.DuckDBStruct value)
+    (into {}
+          (map (fn [[k v]] [(keyword k) (jdbc-value->clj v)]))
+          (.getMap ^org.duckdb.DuckDBStruct value))
+    (into {}
+          (map-indexed (fn [index attribute]
+                         [(keyword (str index)) (jdbc-value->clj attribute)]))
+          (.getAttributes value))))
+
+(defn- jdbc-value->clj [value]
+  (cond
+    (instance? JsonNode value) (.toString ^JsonNode value)
+    (instance? Array value) (jdbc-array->vector value)
+    (instance? Struct value) (jdbc-struct->map value)
+    (instance? Map value) (into {} (map (fn [[k v]] [k (jdbc-value->clj v)])) value)
+    :else value))
+
+(defn- rows->columns [rows]
+  (into {}
+        (map (fn [column]
+               [column (mapv column rows)]))
+        (keys (first rows))))
+
+(defn- jdbc-row [^ResultSet rs ^ResultSetMetaData metadata column-count]
+  (into {}
+        (map (fn [column]
+               (let [^int column column
+                     type-name (.getColumnTypeName metadata column)
+                     value (if (= "BLOB" (str/upper-case type-name))
+                             (.getBytes rs column)
+                             (.getObject rs column))]
+                 [(keyword (.getColumnLabel metadata column))
+                  (jdbc-value->clj value)])))
+        (range 1 (inc column-count))))
+
+(defn- read-jdbc-chunks [^DuckDBPreparedStatement stmt]
+  (with-open [^ResultSet rs (.executeQuery stmt)]
+    (let [^ResultSetMetaData metadata (.getMetaData rs)
+          column-count (.getColumnCount metadata)]
+      (loop [chunks []
+             rows []]
+        (if (.next rs)
+          (let [next-rows (conj rows (jdbc-row rs metadata column-count))]
+            (if (= 2048 (count next-rows))
+              (recur (conj chunks (rows->columns next-rows)) [])
+              (recur chunks next-rows)))
+          (cond-> chunks
+            (seq rows) (conj (rows->columns rows))))))))
+
 (defn- chunk->columns [^DuckDBChunkedResult result]
   (let [^DuckDBDataChunkReader chunk (.chunk result)
         row-count (.rowCount chunk)]
@@ -108,14 +172,22 @@
   Each chunk is a map of column-name keywords to value vectors. The native
   DuckDBChunkedResult is always closed before this function returns or throws."
   [^DuckDBPreparedStatement stmt f init]
-  (with-open [^DuckDBChunkedResult result (.query stmt)]
-    (loop [acc init]
-      (if (.nextChunk result)
-        (let [next-acc (f acc (chunk->columns result))]
-          (if (reduced? next-acc)
-            @next-acc
-            (recur next-acc)))
-        acc))))
+  (let [metadata (.getMetaData stmt)
+        column-count (.getColumnCount metadata)
+        has-unsupported? (some (fn [column]
+                                 (not (native-chunk-type?
+                                       (.getColumnTypeName metadata column))))
+                               (range 1 (inc column-count)))]
+    (if has-unsupported?
+      (reduce f init (read-jdbc-chunks stmt))
+      (with-open [^DuckDBChunkedResult result (.query stmt)]
+        (loop [acc init]
+          (if (.nextChunk result)
+            (let [next-acc (f acc (chunk->columns result))]
+              (if (reduced? next-acc)
+                @next-acc
+                (recur next-acc)))
+            acc))))))
 
 (defn read-chunks
   "Returns native columnar chunks from a prepared statement.
