@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-08-27
+
+### Added
+
+- Added `copy-to-parquet!`, `copy-to-csv!`, `copy-to-json!`, and generic
+  `copy-to!` helpers for safe DuckDB `COPY ... TO` exports, including format
+  options and Hive-partitioned output.
+
 ## [0.5.0] - 2026-08-27
 
 ### Added

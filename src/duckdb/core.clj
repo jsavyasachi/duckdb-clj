@@ -206,6 +206,162 @@
   ([ds path opts]
    (read-table-function ds "read_csv" path opts)))
 
+(declare identifier)
+
+(def ^:private copy-formats #{:parquet :csv :json})
+(def ^:private parquet-compressions
+  #{:uncompressed :snappy :gzip :zstd :brotli :lz4 :lz4-raw})
+(def ^:private json-compressions #{:none :gzip :zstd})
+(def ^:private copy-option-keys
+  #{:format :compression :row-group-size :header? :delimiter :quote :escape
+    :array? :partition-by :overwrite-or-ignore?})
+
+(defn- invalid-copy-option [message option value]
+  (throw (ex-info message {:duckdb/error :invalid-option
+                           :option option
+                           :value value})))
+
+(defn- copy-format [format]
+  (let [format (if (keyword? format) format (keyword (str/lower-case (str format))))]
+    (when-not (contains? copy-formats format)
+      (invalid-copy-option (str "Invalid COPY format: " format) :format format))
+    format))
+
+(defn- copy-bool [option value]
+  (if (or (true? value) (false? value))
+    (str value)
+    (invalid-copy-option (str "COPY option " option " must be boolean") option value)))
+
+(defn- copy-positive-integer [option value]
+  (if (and (integer? value) (pos? value))
+    (str value)
+    (invalid-copy-option (str "COPY option " option " must be a positive integer") option value)))
+
+(defn- copy-character [option value]
+  (if (and (string? value) (= 1 (count value)))
+    (sql-string value)
+    (invalid-copy-option (str "COPY option " option " must be a one-character string") option value)))
+
+(defn- copy-partition-by [value]
+  (if (and (not (string? value)) (seqable? value) (seq value))
+    (str "(" (str/join ", " (map #(identifier :column %) value)) ")")
+    (invalid-copy-option "COPY option :partition-by must contain column names"
+                         :partition-by value)))
+
+(defn- copy-option-sql [format [option value]]
+  (case option
+    :format nil
+    :compression
+    (do
+      (when-not (#{:parquet :json} format)
+        (invalid-copy-option (str "COPY option :compression is not valid for " format)
+                             option value))
+      (let [compression (if (keyword? value) value (keyword (str/lower-case (str value))))
+            valid-compressions (if (= :parquet format)
+                                 parquet-compressions
+                                 json-compressions)]
+        (when-not (contains? valid-compressions compression)
+          (invalid-copy-option (str "Invalid COPY compression: " value) option value))
+        (str "COMPRESSION " (sql-string (str/replace (name compression) "-" "_")))))
+    :row-group-size
+    (do
+      (when-not (= :parquet format)
+        (invalid-copy-option "COPY option :row-group-size is only valid for parquet"
+                             option value))
+      (str "ROW_GROUP_SIZE " (copy-positive-integer option value)))
+    :header?
+    (do
+      (when-not (= :csv format)
+        (invalid-copy-option "COPY option :header? is only valid for csv" option value))
+      (str "HEADER " (copy-bool option value)))
+    :delimiter (do (when-not (= :csv format)
+                     (invalid-copy-option "COPY option :delimiter is only valid for csv" option value))
+                   (str "DELIMITER " (copy-character option value)))
+    :quote (do (when-not (= :csv format)
+                 (invalid-copy-option "COPY option :quote is only valid for csv" option value))
+               (str "QUOTE " (copy-character option value)))
+    :escape (do (when-not (= :csv format)
+                  (invalid-copy-option "COPY option :escape is only valid for csv" option value))
+                (str "ESCAPE " (copy-character option value)))
+    :array?
+    (do
+      (when-not (= :json format)
+        (invalid-copy-option "COPY option :array? is only valid for json" option value))
+      (str "ARRAY " (copy-bool option value)))
+    :partition-by (str "PARTITION_BY " (copy-partition-by value))
+    :overwrite-or-ignore? (str "OVERWRITE_OR_IGNORE " (copy-bool option value))
+    (invalid-copy-option (str "Unknown COPY option: " option) option value)))
+
+(defn- copy-source [source]
+  (cond
+    (keyword? source) (identifier :table source)
+    (symbol? source) (identifier :table source)
+    (map? source)
+    (cond
+      (contains? source :table) (identifier :table (:table source))
+      (contains? source :query) (copy-source (:query source))
+      :else (throw (ex-info "COPY source map requires :table or :query"
+                            {:duckdb/error :invalid-copy-source :source source})))
+    (vector? source) (str "QUERY " (first source))
+    (string? source)
+    (if (re-find #"(?is)^\s*(select|with|from|values)\b" source)
+      (str "QUERY " source)
+      (identifier :table source))
+    :else (throw (ex-info (str "Unsupported COPY source: " (pr-str source))
+                          {:duckdb/error :invalid-copy-source :source source}))))
+
+(defn- copy-sql [source path format opts]
+  (let [query-source (if (and (map? source) (contains? source :query))
+                       (:query source)
+                       source)
+        source-sql (copy-source source)
+        query? (= "QUERY" (subs source-sql 0 5))
+        source-sql (if query? (subs source-sql 6) source-sql)
+        options (->> opts
+                     (map (partial copy-option-sql format))
+                     (remove nil?)
+                     (cons (str "FORMAT " (name format))))]
+    (into [(str "COPY " (if query? (str "(" source-sql ")") source-sql)
+                 " TO " (sql-string path) " (" (str/join ", " options) ")")]
+          (when (vector? query-source) (rest query-source)))))
+
+(defn copy-to!
+  "Exports a table or query to a Parquet, CSV, or JSON file.
+
+  source may be a table keyword/symbol, a table name string, a query string,
+  or a next.jdbc SQL vector. opts requires :format and supports format-specific
+  keyword options such as :compression, :row-group-size, :header?, :delimiter,
+  :array?, :partition-by, and :overwrite-or-ignore?."
+  [ds source path opts]
+  (let [opts (or opts {})
+        unknown (seq (remove copy-option-keys (keys opts)))
+        format (copy-format (:format opts))]
+    (when unknown
+      (invalid-copy-option (str "Unknown COPY option: " (first unknown))
+                           (first unknown) (get opts (first unknown))))
+    (jdbc/execute! ds (copy-sql source path format opts))))
+
+(defn copy-to-parquet!
+  "Exports a table or query to a Parquet file."
+  ([ds source path]
+   (copy-to-parquet! ds source path nil))
+  ([ds source path opts]
+   (copy-to! ds source path (assoc (or opts {}) :format :parquet))))
+
+(defn copy-to-csv!
+  "Exports a table or query to a CSV file."
+  ([ds source path]
+   (copy-to-csv! ds source path nil))
+  ([ds source path opts]
+   (copy-to! ds source path (assoc (or opts {}) :format :csv))))
+
+(defn copy-to-json!
+  "Exports a table or query to a JSON file."
+  ([ds source path]
+   (copy-to-json! ds source path nil))
+  ([ds source path opts]
+   (copy-to! ds source path (assoc (or opts {}) :format :json))))
+
 (defn- identifier [kind value]
   (let [identifier (if (or (keyword? value) (symbol? value))
                      (name value)
