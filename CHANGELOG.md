@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-27
+
 ### Added
 
 - Added `read-json` and `read-ndjson` helpers for JSON table-function ingestion.
