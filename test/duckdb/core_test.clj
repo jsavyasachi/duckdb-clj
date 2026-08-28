@@ -230,6 +230,35 @@
     (is (= [{:id 2 :value nil}]
            (jdbc/execute! con ["select * from append_required order by id"])))))
 
+(deftest appending-omitted-columns-can-use-defaults-explicitly
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table append_defaults (id integer, value integer default 42)"])
+    (let [strict-error (is (thrown? clojure.lang.ExceptionInfo
+                                    (duckdb/append! con :append_defaults [{:id 1}])))
+          default-count (duckdb/append! con :append_defaults [{:id 2}]
+                                        {:omitted-columns :default})
+          null-count (duckdb/append! con :append_defaults [{:id 3 :value nil}]
+                                     {:omitted-columns :default})]
+      (is (= :missing-append-column (:duckdb/error (ex-data strict-error))))
+      (is (= 1 default-count))
+      (is (= 1 null-count)))
+    (is (= [{:id 2 :value 42}
+            {:id 3 :value nil}]
+           (jdbc/execute! con ["select * from append_defaults order by id"])))))
+
+(deftest appender-closes-after-mid-row-failure
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (jdbc/execute! con ["create table append_row_failure
+                         (id integer, info struct(name varchar, age integer))"])
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (duckdb/append!
+                  con
+                  :append_row_failure
+                  [{:id 1 :info {:name "ok" :age 7}}
+                   {:id 2 :info {:name "incomplete"}}])))
+    (is (= [{:id 1 :info {:name "ok" :age 7}}]
+           (jdbc/execute! con ["select * from append_row_failure order by id"])))))
+
 (deftest appends-to-catalog-and-schema-qualified-tables
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create schema analytics"])

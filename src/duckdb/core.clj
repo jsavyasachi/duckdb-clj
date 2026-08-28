@@ -678,15 +678,18 @@
                           {:duckdb/error :unsupported-append-value
                            :value-class (.getName (class value))}))))
 
-(defn- append-row! [^DuckDBAppender app columns row]
-  (doseq [{:keys [key]} columns]
-    (when-not (contains? row key)
-      (throw (ex-info (str "DuckDB append row is missing column " key)
-                      {:duckdb/error :missing-append-column
-                       :column key}))))
+(defn- append-row! [^DuckDBAppender app columns row omitted-columns]
+  (when (= :strict omitted-columns)
+    (doseq [{:keys [key]} columns]
+      (when-not (contains? row key)
+        (throw (ex-info (str "DuckDB append row is missing column " key)
+                        {:duckdb/error :missing-append-column
+                         :column key})))))
   (.beginRow app)
   (doseq [{:keys [key type-name]} columns]
-    (append-value! app type-name (get row key)))
+    (if (contains? row key)
+      (append-value! app type-name (get row key))
+      (.appendDefault app)))
   (.endRow app))
 
 (defn- append-failed [^SQLException cause row-index]
@@ -698,17 +701,34 @@
     :cause-message (.getMessage cause)}
    cause))
 
-(defn- append-with-connection! [^Connection con table rows]
+(def ^:private append-option-keys #{:omitted-columns})
+
+(defn- append-options [opts]
+  (let [opts (or opts {})
+        unknown (seq (remove append-option-keys (keys opts)))
+        omitted-columns (get opts :omitted-columns :strict)]
+    (when unknown
+      (throw (ex-info (str "Unknown DuckDB append option: " (first unknown))
+                      {:duckdb/error :invalid-option
+                       :option (first unknown)})))
+    (when-not (#{:strict :default} omitted-columns)
+      (throw (ex-info (str "Invalid omitted-columns option: " omitted-columns)
+                      {:duckdb/error :invalid-option
+                       :option :omitted-columns
+                       :value omitted-columns})))
+    omitted-columns))
+
+(defn- append-with-connection! [^Connection con table rows omitted-columns]
   (let [table (identifier :table table)
         columns (table-columns con table)
         ^DuckDBConnection duck-con (duckdb-connection con)]
     (with-open [^DuckDBAppender app (.createAppender duck-con table)]
       (doseq [[row-index row] (map-indexed vector rows)]
         (try
-          (append-row! app columns row)
+          (append-row! app columns row omitted-columns)
+          (.flush app)
           (catch SQLException e
             (throw (append-failed e row-index)))))
-      (.flush app)
       (count rows))))
 
 (defn- qualified-target [target]
@@ -728,7 +748,7 @@
 (defn- qualified-name [{:keys [catalog schema table]}]
   (str/join "." (remove nil? [catalog schema table])))
 
-(defn- append-qualified-with-connection! [^Connection con target rows]
+(defn- append-qualified-with-connection! [^Connection con target rows omitted-columns]
   (let [{:keys [catalog schema table] :as target} (qualified-target target)
         columns (table-columns con (qualified-name target))]
     (with-open [^DuckDBAppender app (if catalog
@@ -738,26 +758,32 @@
                                        (create-appender con table)))]
       (doseq [[row-index row] (map-indexed vector rows)]
         (try
-          (append-row! app columns row)
+          (append-row! app columns row omitted-columns)
+          (.flush app)
           (catch SQLException e
             (throw (append-failed e row-index)))))
-      (.flush app)
       (count rows))))
 
 (defn append!
   "Bulk inserts map rows into table with DuckDB's Appender API.
 
-  Row values are appended in the table's declared column order, not map order."
-  [ds table rows]
-  (let [rows (vec rows)]
+  Row values are appended in the table's declared column order, not map order.
+  By default, every table column must be present in each row. Pass
+  {:omitted-columns :default} to use a column's SQL DEFAULT when its key is
+  absent; an explicit nil always appends SQL NULL."
+  ([ds table rows]
+   (append! ds table rows nil))
+  ([ds table rows opts]
+   (let [rows (vec rows)
+         omitted-columns (append-options opts)]
     (if (instance? Connection ds)
       (if (map? table)
-        (append-qualified-with-connection! ds table rows)
-        (append-with-connection! ds table rows))
+        (append-qualified-with-connection! ds table rows omitted-columns)
+        (append-with-connection! ds table rows omitted-columns))
       (with-open [con (jdbc/get-connection ds)]
         (if (map? table)
-          (append-qualified-with-connection! con table rows)
-          (append-with-connection! con table rows))))))
+          (append-qualified-with-connection! con table rows omitted-columns)
+          (append-with-connection! con table rows omitted-columns)))))))
 
 (defn- append-single-value!
   [^DuckDBSingleValueAppender app type-name value]

@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in `append!` support for using SQL defaults on omitted columns via
+  `{:omitted-columns :default}`. Explicit `nil` remains SQL `NULL`.
+
 ## [0.7.0] - 2026-08-27
 
 ### Added
