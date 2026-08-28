@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-28
+
 ### Added
 
 - Added opt-in `append!` support for using SQL defaults on omitted columns via
