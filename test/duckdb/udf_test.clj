@@ -6,7 +6,7 @@
             [next.jdbc :as jdbc])
   (:import (java.sql SQLException)
            (java.util UUID)
-           (org.duckdb DuckDBColumnType DuckDBWritableVector)))
+           (org.duckdb DuckDBColumnType DuckDBLogicalType DuckDBWritableVector)))
 
 (set! *warn-on-reflection* true)
 
@@ -57,6 +57,30 @@
            #"intentional scalar failure"
            (jdbc/execute! con [(format "select %s(1)" function-name)]))))))
 
+(deftest registers-functional-and-varargs-scalar-functions
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (with-open [integer-type (DuckDBLogicalType/of DuckDBColumnType/INTEGER)]
+      (let [one (unique-name "functional")
+          two (unique-name "bifunctional")
+          zero (unique-name "supplier")
+          many (unique-name "varargs")]
+      (udf/register-scalar! con one #(str "v" %) {:parameters [Integer]
+                                                    :return-type String
+                                                    :mode :function})
+      (udf/register-scalar! con two (fn [a b] (int (+ a b))) {:parameters [Integer Integer]
+                                                        :return-type Integer
+                                                        :mode :bi-function})
+      (udf/register-scalar! con zero (constantly (int 42)) {:return-type Integer
+                                                      :mode :supplier})
+      (udf/register-scalar! con many (fn [values] (int (reduce + values)))
+                             {:return-type Integer
+                              :mode :varargs
+                              :varargs-type integer-type})
+      (is (= [{:one "v7" :two 5 :zero 42 :many 6}]
+             (jdbc/execute! con
+                            [(format "select %s(7) one, %s(2, 3) two, %s() zero, %s(1, 2, 3) many"
+                                     one two zero many)])))))))
+
 (deftest registers-table-functions-with-parameters-state-and-vectors
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (let [function-name (unique-name "numbered_labels")]
@@ -96,5 +120,5 @@
     (let [doc (:doc (meta v))]
       (is (str/includes? doc "PROCESS-GLOBAL"))
       (is (str/includes? doc "CANNOT be removed"))
-      (is (str/includes? doc "duckdb_jdbc 1.5.4.0"))
+      (is (str/includes? doc "duckdb_jdbc 1.5.5.1"))
       (is (str/includes? doc "stable, unique names")))))

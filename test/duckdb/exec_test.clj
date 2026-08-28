@@ -37,6 +37,24 @@
     (is (= (LocalTime/of 12 34 56 123456000)
            (read-single-value con "select '12:34:56.123456'::TIME as value")))))
 
+(deftest reads-remaining-native-scalar-types-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (with-open [^DuckDBPreparedStatement stmt
+                (exec/prepare con
+                              "select true as bool, 1::utinyint as ub,
+                                      1.5::float as real, 12.34::decimal(10,2) as amount,
+                                      '2024-01-02'::date as day,
+                                      '2024-01-02 03:04:05'::timestamp as happened,
+                                      '2024-01-02 03:04:05+00'::timestamptz as zoned")]
+      (let [row (first (exec/read-chunks stmt))]
+        (is (= true (first (:bool row))))
+        (is (= 1 (first (:ub row))))
+        (is (= 1.5 (first (:real row))))
+        (is (= (bigdec "12.34") (first (:amount row))))
+        (is (= (java.time.LocalDate/of 2024 1 2) (first (:day row))))
+        (is (instance? java.sql.Timestamp (first (:happened row))))
+        (is (instance? java.time.OffsetDateTime (first (:zoned row))))))))
+
 (deftest reads-enum-values-from-native-chunks
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create type mood as enum ('sad', 'ok', 'happy')"])
@@ -127,8 +145,31 @@
     (exec/bind-parameters! stmt [nil "second"])
     (exec/bind-hugeint! stmt 1 (BigInteger. "-170141183460469231731687303715884105728"))
     (is (= {:n (BigInteger. "-170141183460469231731687303715884105728")
-            :label "second"}
+           :label "second"}
            (jdbc/execute-one! stmt)))))
+
+(deftest binds-duckdb-specific-values-on-reusable-statements
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))
+              ^DuckDBPreparedStatement stmt
+              (exec/prepare con "select ?::uuid as id, ?::decimal(10,2) as amount, (?::date)::varchar as day, (?::time)::varchar as at, (?::timestamp)::varchar as happened, hex(?::blob) as payload")]
+    (let [bindings [['duckdb.exec/bind-uuid! (java.util.UUID/fromString "550e8400-e29b-41d4-a716-446655440000")]
+                    ['duckdb.exec/bind-decimal! (bigdec "12.34")]
+                    ['duckdb.exec/bind-date! (java.time.LocalDate/of 2024 1 2)]
+                    ['duckdb.exec/bind-time! (java.time.LocalTime/of 3 4 5)]
+                    ['duckdb.exec/bind-timestamp! (java.time.LocalDateTime/of 2024 1 2 3 4 5)]
+                    ['duckdb.exec/bind-bytes! (byte-array [0 1 -1])]]]
+      (doseq [[symbol _] bindings]
+        (is (fn? (some-> (resolve symbol) var-get))))
+      (when (every? (comp fn? #(some-> (resolve (first %)) var-get)) bindings)
+        (doseq [[index [symbol value]] (map-indexed vector bindings)]
+          (@(resolve symbol) stmt (inc index) value))
+        (is (= {:id (java.util.UUID/fromString "550e8400-e29b-41d4-a716-446655440000")
+                :amount (bigdec "12.34")
+                :day "2024-01-02"
+                :at "03:04:05"
+                :happened "2024-01-02 03:04:05"
+                :payload "0001FF"}
+               (jdbc/execute-one! stmt)))))))
 
 (deftest cancels-long-running-queries-from-another-thread
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))

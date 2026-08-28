@@ -160,6 +160,67 @@ a next.jdbc SQL vector remain JDBC-bound. Parquet supports `:compression` and
 `:escape`; JSON supports `:array?`. All formats support `:partition-by` and
 `:overwrite-or-ignore?` for partitioned output.
 
+### Reusable statements and streaming
+
+```clojure
+(require '[duckdb.exec :as exec])
+
+(with-open [con (jdbc/get-connection ds)
+            stmt (exec/prepare con "select ?::hugeint + ?::integer as total")]
+  (exec/bind-hugeint! stmt 1 100000000000000000000)
+  (exec/bind-parameters! stmt [nil 23])
+  (jdbc/execute! stmt))
+
+(exec/reduce-streaming ds ["select i from range(1000000) t(i)"]
+                       (map :i) + 0)
+```
+
+`duckdb.exec` also provides `read-chunks`, query cancellation, timeout and
+profiling helpers. `bind-uuid!`, `bind-decimal!`, `bind-date!`, `bind-time!`,
+`bind-timestamp!`, and `bind-bytes!` cover DuckDB-specific reusable bindings.
+
+### Metadata and scalar UDFs
+
+```clojure
+(require '[duckdb.meta :as meta]
+         '[duckdb.udf :as udf])
+
+(with-open [con (jdbc/get-connection ds)]
+  (meta/driver-info con)
+  (meta/columns con {:schema-pattern "main" :table-pattern "events"})
+  (udf/register-scalar! con "double_int" #(* 2 %)
+                         {:parameters [Integer]
+                          :return-type Integer
+                          :mode :function})
+  (jdbc/execute! con ["select double_int(21)"]))
+```
+
+UDF registrations are process-global and cannot be removed by the driver; use
+stable, unique names. `:mode` supports `:function`, `:bi-function`,
+`:supplier`, and `:varargs` (the latter also requires a
+`DuckDBLogicalType` as `:varargs-type`).
+
+### Arrow
+
+With the optional `:arrow` alias enabled and its `--add-opens` JVM option, an
+Arrow reader can be consumed inside a resource scope:
+
+```clojure
+(require '[duckdb.arrow :as arrow]
+         '[org.apache.arrow.memory RootAllocator])
+
+(let [allocator (RootAllocator.)]
+  (try
+    (with-open [con (jdbc/get-connection ds)]
+      (arrow/with-arrow-reader con ["select * from events"] allocator
+                                (fn [reader]
+                                  (while (.loadNextBatch reader)
+                                    (println (.getRowCount (.getVectorSchemaRoot reader)))))))
+    (finally (.close allocator))))
+```
+
+The caller owns the allocator and must keep it open while consuming the reader.
+
 ## Semantics worth knowing
 
 - **STRUCT** fields are keywordized on read (`{:name "alice"}`); on write, the
