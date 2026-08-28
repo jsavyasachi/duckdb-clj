@@ -127,8 +127,31 @@
     (exec/bind-parameters! stmt [nil "second"])
     (exec/bind-hugeint! stmt 1 (BigInteger. "-170141183460469231731687303715884105728"))
     (is (= {:n (BigInteger. "-170141183460469231731687303715884105728")
-            :label "second"}
+           :label "second"}
            (jdbc/execute-one! stmt)))))
+
+(deftest binds-duckdb-specific-values-on-reusable-statements
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))
+              ^DuckDBPreparedStatement stmt
+              (exec/prepare con "select ?::uuid as id, ?::decimal(10,2) as amount, (?::date)::varchar as day, (?::time)::varchar as at, (?::timestamp)::varchar as happened, hex(?::blob) as payload")]
+    (let [bindings [['duckdb.exec/bind-uuid! (java.util.UUID/fromString "550e8400-e29b-41d4-a716-446655440000")]
+                    ['duckdb.exec/bind-decimal! (bigdec "12.34")]
+                    ['duckdb.exec/bind-date! (java.time.LocalDate/of 2024 1 2)]
+                    ['duckdb.exec/bind-time! (java.time.LocalTime/of 3 4 5)]
+                    ['duckdb.exec/bind-timestamp! (java.time.LocalDateTime/of 2024 1 2 3 4 5)]
+                    ['duckdb.exec/bind-bytes! (byte-array [0 1 -1])]]]
+      (doseq [[symbol _] bindings]
+        (is (fn? (some-> (resolve symbol) var-get))))
+      (when (every? (comp fn? #(some-> (resolve (first %)) var-get)) bindings)
+        (doseq [[index [symbol value]] (map-indexed vector bindings)]
+          (@(resolve symbol) stmt (inc index) value))
+        (is (= {:id (java.util.UUID/fromString "550e8400-e29b-41d4-a716-446655440000")
+                :amount (bigdec "12.34")
+                :day "2024-01-02"
+                :at "03:04:05"
+                :happened "2024-01-02 03:04:05"
+                :payload "0001FF"}
+               (jdbc/execute-one! stmt)))))))
 
 (deftest cancels-long-running-queries-from-another-thread
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))

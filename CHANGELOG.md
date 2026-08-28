@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 ### Added
 
 - Added `read-json` and `read-ndjson` helpers for JSON table-function ingestion.
+- Added reusable-statement helpers for UUID, decimal, date, time, timestamp, and binary bindings.
 
 ## [0.6.0] - 2026-08-27
 

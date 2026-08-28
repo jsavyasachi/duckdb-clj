@@ -5,8 +5,10 @@
             [duckdb.types]
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prep])
-  (:import (java.math BigInteger)
+  (:import (java.math BigDecimal BigInteger)
            (java.sql Array Connection ParameterMetaData ResultSet ResultSetMetaData Struct)
+           (java.sql Date Time Timestamp)
+           (java.time LocalDate LocalDateTime LocalTime)
            (java.util Map Properties)
            (java.util.concurrent Executors ScheduledExecutorService
                                  ScheduledFuture ThreadFactory TimeUnit)
@@ -262,6 +264,48 @@
   (.setBigInteger stmt index (if (instance? BigInteger value)
                                value
                                (biginteger value)))
+  stmt)
+
+(defn bind-uuid!
+  "Binds a UUID at the one-based parameter index." 
+  [^DuckDBPreparedStatement stmt index ^java.util.UUID value]
+  (.setObject stmt index value)
+  stmt)
+
+(defn bind-decimal!
+  "Binds a BigDecimal at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index value]
+  (.setBigDecimal stmt index ^BigDecimal value)
+  stmt)
+
+(defn bind-date!
+  "Binds a LocalDate or java.sql.Date at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index value]
+  (.setDate stmt index (if (instance? LocalDate value)
+                         (Date/valueOf ^LocalDate value)
+                         ^Date value))
+  stmt)
+
+(defn bind-time!
+  "Binds a LocalTime or java.sql.Time at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index value]
+  (.setTime stmt index (if (instance? LocalTime value)
+                         (Time/valueOf ^LocalTime value)
+                         ^Time value))
+  stmt)
+
+(defn bind-timestamp!
+  "Binds a LocalDateTime or java.sql.Timestamp at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index value]
+  (.setTimestamp stmt index (if (instance? LocalDateTime value)
+                              (Timestamp/valueOf ^LocalDateTime value)
+                              ^Timestamp value))
+  stmt)
+
+(defn bind-bytes!
+  "Binds a byte array at the one-based parameter index."
+  [^DuckDBPreparedStatement stmt index ^bytes value]
+  (.setBytes stmt index value)
   stmt)
 
 (defn query-progress
