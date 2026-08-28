@@ -135,6 +135,24 @@
                   {:id 2 :name "bob"}]
                  (duckdb/read-csv con csv-path {:header true}))))))))
 
+(deftest reads-json-and-ndjson
+  (with-temp-dir
+    (fn [dir]
+      (let [json-path (path-str dir "rows.json")
+            ndjson-path (path-str dir "rows.ndjson")]
+        (spit json-path "[{\"id\": 1, \"name\": \"alice\"}, {\"id\": 2, \"name\": \"bob\"}]")
+        (spit ndjson-path "{\"id\": 3, \"name\": \"cara\"}\n{\"id\": 4, \"name\": \"dave\"}\n")
+        (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+          (let [read-json (resolve 'duckdb.core/read-json)
+                read-ndjson (resolve 'duckdb.core/read-ndjson)]
+            (is (fn? @read-json))
+            (is (fn? @read-ndjson))
+            (when (and (fn? @read-json) (fn? @read-ndjson))
+              (is (= [{:id 1 :name "alice"} {:id 2 :name "bob"}]
+                     (@read-json con json-path)))
+              (is (= [{:id 3 :name "cara"} {:id 4 :name "dave"}]
+                     (@read-ndjson con ndjson-path))))))))))
+
 (deftest attaches-and-detaches-file-databases
   (with-temp-dir
     (fn [dir]

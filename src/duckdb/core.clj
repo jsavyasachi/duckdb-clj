@@ -206,6 +206,20 @@
   ([ds path opts]
    (read-table-function ds "read_csv" path opts)))
 
+(defn read-json
+  "Reads a JSON array through DuckDB read_json and returns result rows."
+  ([ds path]
+   (read-json ds path nil))
+  ([ds path opts]
+   (read-table-function ds "read_json" path opts)))
+
+(defn read-ndjson
+  "Reads newline-delimited JSON through DuckDB read_json and returns rows."
+  ([ds path]
+   (read-ndjson ds path nil))
+  ([ds path opts]
+   (read-table-function ds "read_json" path (assoc (or opts {}) :format "newline_delimited"))))
+
 (declare identifier)
 
 (def ^:private copy-formats #{:parquet :csv :json})
