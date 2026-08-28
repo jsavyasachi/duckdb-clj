@@ -38,3 +38,27 @@
       (finally
         (is (zero? (.getAllocatedMemory allocator)))
         (.close allocator)))))
+
+(deftest arrow-reader-closes-after-consumer-failure
+  (let [allocator (RootAllocator.)]
+    (try
+      (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"consumer failed"
+             (arrow/with-arrow-reader
+               con ["select 1 as value"] allocator
+               (fn [_] (throw (ex-info "consumer failed" {})))))))
+      (finally
+        (is (zero? (.getAllocatedMemory allocator)))
+        (.close allocator)))))
+
+(deftest arrow-export-rejects-invalid-batch-size-without-leaking
+  (let [allocator (RootAllocator.)]
+    (try
+      (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (arrow/arrow-export con ["select 1"] allocator 0))))
+      (finally
+        (is (zero? (.getAllocatedMemory allocator)))
+        (.close allocator)))))

@@ -37,6 +37,24 @@
     (is (= (LocalTime/of 12 34 56 123456000)
            (read-single-value con "select '12:34:56.123456'::TIME as value")))))
 
+(deftest reads-remaining-native-scalar-types-from-native-chunks
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (with-open [^DuckDBPreparedStatement stmt
+                (exec/prepare con
+                              "select true as bool, 1::utinyint as ub,
+                                      1.5::float as real, 12.34::decimal(10,2) as amount,
+                                      '2024-01-02'::date as day,
+                                      '2024-01-02 03:04:05'::timestamp as happened,
+                                      '2024-01-02 03:04:05+00'::timestamptz as zoned")]
+      (let [row (first (exec/read-chunks stmt))]
+        (is (= true (first (:bool row))))
+        (is (= 1 (first (:ub row))))
+        (is (= 1.5 (first (:real row))))
+        (is (= (bigdec "12.34") (first (:amount row))))
+        (is (= (java.time.LocalDate/of 2024 1 2) (first (:day row))))
+        (is (instance? java.sql.Timestamp (first (:happened row))))
+        (is (instance? java.time.OffsetDateTime (first (:zoned row))))))))
+
 (deftest reads-enum-values-from-native-chunks
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (jdbc/execute! con ["create type mood as enum ('sad', 'ok', 'happy')"])
