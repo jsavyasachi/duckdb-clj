@@ -122,6 +122,16 @@ ENUM columns read as strings; write keywords or strings as parameters.
 order, not map iteration order. It uses DuckDB's Appender API. It supports
 common scalar values and nested LIST and STRUCT values.
 
+By default, every table column must be present in each row. To use a column's
+SQL default when its key is omitted, pass `{:omitted-columns :default}` as the
+fourth argument. An explicit `nil` always appends SQL `NULL`, including when
+this option is enabled.
+
+```clojure
+(duck/append! ds :events [{:id 1}]
+              {:omitted-columns :default})
+```
+
 ### File helpers
 
 ```clojure
