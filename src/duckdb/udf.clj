@@ -1,12 +1,13 @@
 (ns duckdb.udf
   "Helpers that only register Java-backed DuckDB scalar and table functions.
 
-  Registrations are process-global. duckdb_jdbc 1.5.4.0 has no way to remove
+  Registrations are process-global. duckdb_jdbc 1.5.5.1 has no way to remove
   them. Registered callbacks live for the lifetime of the JVM."
   (:require [next.jdbc :as jdbc])
   (:import (java.math BigDecimal BigInteger)
            (java.sql Connection Date Timestamp)
            (java.time LocalDate LocalDateTime OffsetDateTime)
+           (java.util.function BiFunction Function Supplier)
            (org.duckdb DuckDBColumnType DuckDBDataChunkReader
                        DuckDBFunctions
                        DuckDBFunctions$FunctionException DuckDBLogicalType
@@ -166,6 +167,16 @@
         (catch Throwable cause
           (throw (callback-error name cause)))))))
 
+(defn- functional-callback [name f mode]
+  (try
+    (case mode
+      :function (reify Function (apply [_ value] (f value)))
+      :bi-function (reify BiFunction (apply [_ left right] (f left right)))
+      :supplier (reify Supplier (get [_] (f)))
+      :varargs (reify Function (apply [_ values] (f values))))
+    (catch Throwable cause
+      (throw (callback-error name cause)))))
+
 (defn register-scalar!
   "Registers f as a typed scalar function. Returns the driver registration.
 
@@ -175,10 +186,10 @@
   - :null-handling is :special (default) or :null-in-null-out.
   - :volatility is :immutable (default) or :volatile.
 
-  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.4.0 registrations CANNOT be removed for the lifetime of the JVM.
+  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.5.1 registrations CANNOT be removed for the lifetime of the JVM.
   The driver has no deregistration. Use stable, unique names. Do not register
   the same name again in one JVM."
-  [connectable name f {:keys [parameters return-type null-handling volatility]
+  [connectable name f {:keys [parameters return-type null-handling volatility mode varargs-type]
                        :or {parameters []
                             null-handling :special
                             volatility :immutable}}]
@@ -191,7 +202,23 @@
           (doseq [type parameters]
             (add-scalar-parameter! builder type))
           (set-return-type! builder return-type)
-          (.withVectorizedFunction builder (scalar-callback name f))
+          (if mode
+            (do
+              (when (and (= mode :varargs) (nil? varargs-type))
+                (throw (IllegalArgumentException.
+                        ":varargs mode requires :varargs-type")))
+              (when (= mode :varargs)
+                (.withVarArgs builder ^DuckDBLogicalType varargs-type))
+              (case mode
+                (:function :bi-function :supplier :varargs)
+                (case mode
+                  :function (.withFunction builder ^Function (functional-callback name f mode))
+                  :bi-function (.withFunction builder ^BiFunction (functional-callback name f mode))
+                  :supplier (.withFunction builder ^Supplier (functional-callback name f mode))
+                  :varargs (.withVarArgsFunction builder ^Function (functional-callback name f mode)))
+                (throw (IllegalArgumentException.
+                        (str "Unsupported scalar function mode: " mode)))))
+            (.withVectorizedFunction builder (scalar-callback name f)))
           (case null-handling
             :special nil
             :null-in-null-out (.withNullInNullOut builder)
@@ -326,7 +353,7 @@
   - :apply receives bind/state data, capacity, and writable :vectors. It returns
     the number of rows written. :max-threads is optional.
 
-  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.4.0 registrations CANNOT be removed for the lifetime of the JVM.
+  Registrations are PROCESS-GLOBAL. duckdb_jdbc 1.5.5.1 registrations CANNOT be removed for the lifetime of the JVM.
   The driver has no deregistration. Use stable, unique names. Do not register
   the same name again in one JVM."
   [connectable name {:keys [parameters named-parameters]
