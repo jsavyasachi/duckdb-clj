@@ -145,19 +145,24 @@
                   (jdbc-value->clj value)])))
         (range 1 (inc column-count))))
 
-(defn- read-jdbc-chunks [^DuckDBPreparedStatement stmt]
+(defn- reduce-jdbc-chunks [^DuckDBPreparedStatement stmt f init]
   (with-open [^ResultSet rs (.executeQuery stmt)]
     (let [^ResultSetMetaData metadata (.getMetaData rs)
           column-count (.getColumnCount metadata)]
-      (loop [chunks []
+      (loop [acc init
              rows []]
         (if (.next rs)
           (let [next-rows (conj rows (jdbc-row rs metadata column-count))]
             (if (= 2048 (count next-rows))
-              (recur (conj chunks (rows->columns next-rows)) [])
-              (recur chunks next-rows)))
-          (cond-> chunks
-            (seq rows) (conj (rows->columns rows))))))))
+              (let [next-acc (f acc (rows->columns next-rows))]
+                (if (reduced? next-acc)
+                  @next-acc
+                  (recur next-acc [])))
+              (recur acc next-rows)))
+          (if (seq rows)
+            (let [next-acc (f acc (rows->columns rows))]
+              (if (reduced? next-acc) @next-acc next-acc))
+            acc))))))
 
 (defn- chunk->columns [^DuckDBChunkedResult result]
   (let [^DuckDBDataChunkReader chunk (.chunk result)
@@ -182,7 +187,7 @@
                                        (.getColumnTypeName metadata column))))
                                (range 1 (inc column-count)))]
     (if has-unsupported?
-      (reduce f init (read-jdbc-chunks stmt))
+      (reduce-jdbc-chunks stmt f init)
       (with-open [^DuckDBChunkedResult result (.query stmt)]
         (loop [acc init]
           (if (.nextChunk result)

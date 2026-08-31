@@ -76,6 +76,23 @@
     (is (= {"k" 1}
            (read-single-value con "select MAP {'k': 1} as value")))))
 
+(deftest reduces-jdbc-fallback-chunks-incrementally
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))
+              ^DuckDBPreparedStatement stmt
+              (exec/prepare con "select repeat('x', 1)::BLOB as payload from range(5000)")]
+    (let [rows-read (atom 0)
+          jdbc-row (var-get (ns-resolve 'duckdb.exec 'jdbc-row))]
+      (with-redefs [duckdb.exec/jdbc-row
+                    (fn [rs metadata column-count]
+                      (swap! rows-read inc)
+                      (jdbc-row rs metadata column-count))]
+        (is (= 2048
+               (exec/reduce-chunks stmt
+                                    (fn [_ chunk]
+                                      (reduced (count (:payload chunk))))
+                                    nil)))
+        (is (= 2048 @rows-read))))))
+
 (deftest reduces-large-native-results-in-streaming-mode
   (let [ds (duckdb/memory-datasource)]
     (is (= 4999950000
