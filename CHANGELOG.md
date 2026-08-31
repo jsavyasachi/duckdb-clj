@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-30
+
+### Changed
+
+- **Breaking:** `reduce-streaming` now rejects foreign `DataSource` instances
+  with `:duckdb/error :unsupported-streaming-datasource` instead of opening a
+  fresh connection that discards the datasource's read-only and session
+  configuration. Callers passing a plain next.jdbc db-spec map must use
+  `duckdb.core/datasource` or a JDBC URL string; JDBC URL strings and
+  datasources created by `duckdb.core` are unaffected.
+
+### Fixed
+
+- `reduce-chunks` now reduces JDBC fallback results incrementally, allowing
+  large results to avoid full materialization and allowing `reduced` to stop
+  database work early.
+- UDF registration and callbacks now agree on supported descriptors. Scalar
+  and table-result support now includes `java.sql.Date`, `java.sql.Timestamp`,
+  and timestamp-with-time-zone vector values. Descriptors without callback
+  support, including `TIME` and table-function timestamp-with-time-zone
+  parameters, are rejected during registration with an error naming the type.
+- A timed-out task can no longer cancel a later reuse of the same prepared
+  statement; timeout cancellation applies only to the execution it was
+  scheduled for.
+
 ## [0.8.0] - 2026-08-28
 
 ### Added
