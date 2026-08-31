@@ -12,7 +12,6 @@
            (java.util Map Properties)
            (java.util.concurrent Executors ScheduledExecutorService
                                  ScheduledFuture ThreadFactory TimeUnit)
-           (javax.sql DataSource)
            (org.duckdb DuckDBChunkedResult DuckDBColumnType JsonNode
                        DuckDBConnection DuckDBDataChunkReader DuckDBDriver
                        DuckDBPreparedStatement DuckDBReadableVector
