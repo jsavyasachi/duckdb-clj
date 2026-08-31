@@ -57,6 +57,20 @@
            #"intentional scalar failure"
            (jdbc/execute! con [(format "select %s(1)" function-name)]))))))
 
+(deftest rejects-unsupported-scalar-udf-types-at-registration
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (try
+      (udf/register-scalar!
+       con
+       (unique-name "time_parameter")
+       identity
+       {:parameters [DuckDBColumnType/TIME]
+        :return-type DuckDBColumnType/VARCHAR})
+      (is false "TIME must be rejected during registration")
+      (catch Throwable error
+        (is (instance? clojure.lang.ExceptionInfo error))
+        (is (re-find #"TIME" (.getMessage error)))))))
+
 (deftest registers-functional-and-varargs-scalar-functions
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (with-open [integer-type (DuckDBLogicalType/of DuckDBColumnType/INTEGER)]
@@ -114,6 +128,27 @@
               con
               [(format "select * from %s(3, prefix = 'row-') order by id"
                        function-name)]))))))
+
+(deftest table-functions-support-timestamp-with-time-zone
+  (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
+    (let [function-name (unique-name "echo_timestamptz")]
+      (udf/register-table!
+       con function-name
+       {:columns [[:value DuckDBColumnType/TIMESTAMP_WITH_TIME_ZONE]]
+        :init (fn [_] (atom false))
+        :apply (fn [{:keys [state vectors]}]
+                 (if (compare-and-set! state false true)
+                   (do
+                     (let [^DuckDBWritableVector vector (first vectors)]
+                       (.setOffsetDateTime vector 0
+                                           (java.time.OffsetDateTime/parse "2024-01-02T03:04:05Z")))
+                     1)
+                   0))})
+      (is (= 1
+             (count
+              (jdbc/execute!
+               con
+               [(format "select * from %s()" function-name)])))))))
 
 (deftest public-docstrings-warn-that-registration-cannot-be-removed
   (doseq [v [#'udf/register-scalar! #'udf/register-table!]]

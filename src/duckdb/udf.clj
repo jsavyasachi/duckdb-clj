@@ -18,6 +18,40 @@
 
 (set! *warn-on-reflection* true)
 
+(def ^:private supported-column-types
+  #{DuckDBColumnType/BOOLEAN DuckDBColumnType/TINYINT
+    DuckDBColumnType/UTINYINT DuckDBColumnType/SMALLINT
+    DuckDBColumnType/USMALLINT DuckDBColumnType/INTEGER
+    DuckDBColumnType/UINTEGER DuckDBColumnType/BIGINT
+    DuckDBColumnType/UBIGINT DuckDBColumnType/HUGEINT
+    DuckDBColumnType/UHUGEINT DuckDBColumnType/FLOAT
+    DuckDBColumnType/DOUBLE DuckDBColumnType/DECIMAL
+    DuckDBColumnType/DATE DuckDBColumnType/TIMESTAMP
+    DuckDBColumnType/TIMESTAMP_MS DuckDBColumnType/TIMESTAMP_NS
+    DuckDBColumnType/TIMESTAMP_S DuckDBColumnType/TIMESTAMP_WITH_TIME_ZONE
+    DuckDBColumnType/VARCHAR DuckDBColumnType/JSON DuckDBColumnType/UUID})
+
+(def ^:private supported-class-types
+  #{Boolean Boolean/TYPE Byte Byte/TYPE Short Short/TYPE Integer Integer/TYPE
+    Long Long/TYPE Float Float/TYPE Double Double/TYPE BigInteger BigDecimal
+    String LocalDate LocalDateTime OffsetDateTime Date Timestamp})
+
+(defn- validate-type-descriptor! [type & [context]]
+  (when (or (and (instance? DuckDBColumnType type)
+                (not (contains? supported-column-types type)))
+            (and (instance? Class type)
+                 (not (contains? supported-class-types type)))
+            (and (= context :table-parameter)
+                 (= type DuckDBColumnType/TIMESTAMP_WITH_TIME_ZONE)))
+    (throw (ex-info (str "Unsupported DuckDB UDF type descriptor: " type)
+                    {:duckdb/error :unsupported-udf-type
+                     :type type})))
+  type)
+
+(defn- validate-type-descriptors! [types]
+  (doseq [type types]
+    (validate-type-descriptor! type)))
+
 (defn- function-name [value]
   (if (or (keyword? value) (symbol? value))
     (name value)
@@ -200,7 +234,9 @@
         (with-open [^DuckDBScalarFunctionBuilder builder (DuckDBFunctions/scalarFunction)]
           (.withName builder name)
           (doseq [type parameters]
+            (validate-type-descriptor! type)
             (add-scalar-parameter! builder type))
+          (validate-type-descriptor! return-type)
           (set-return-type! builder return-type)
           (if mode
             (do
@@ -253,6 +289,8 @@
     LocalDate DuckDBColumnType/DATE
     LocalDateTime DuckDBColumnType/TIMESTAMP
     OffsetDateTime DuckDBColumnType/TIMESTAMP_WITH_TIME_ZONE
+    Date DuckDBColumnType/DATE
+    Timestamp DuckDBColumnType/TIMESTAMP
     nil))
 
 (defn- read-parameter [^DuckDBValue value descriptor]
@@ -360,6 +398,11 @@
                      :or {parameters [] named-parameters {}}
                      :as opts}]
   (let [name (function-name name)]
+    (doseq [type parameters]
+      (validate-type-descriptor! type :table-parameter))
+    (doseq [type (vals named-parameters)]
+      (validate-type-descriptor! type :table-parameter))
+    (validate-type-descriptors! (map second (:columns opts)))
     (with-connection
       connectable
       (fn [^Connection con]
