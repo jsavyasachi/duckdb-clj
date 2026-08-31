@@ -357,18 +357,22 @@
                      {:duckdb/error :invalid-timeout
                       :timeout-ms timeout-ms})))
    (let [^ScheduledExecutorService executor (cancel-executor)
+         gate (Object.)
+         active (atom true)
          task (reify Runnable
                 (run [_]
-                  (try
-                    (when on-timeout
-                      (on-timeout stmt))
-                    (finally
+                  (locking gate
+                    (when @active
+                      (when on-timeout
+                        (on-timeout stmt))
                       (cancel! stmt)))))
          ^ScheduledFuture scheduled (.schedule executor task (long timeout-ms)
                                                 TimeUnit/MILLISECONDS)]
      (try
        (.execute stmt)
        (finally
+         (locking gate
+           (reset! active false))
          (.cancel scheduled false)
          (.shutdownNow executor))))))
 

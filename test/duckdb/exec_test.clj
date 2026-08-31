@@ -227,6 +227,24 @@
              (set (keys (:progress observation)))))
       (is (every? number? (vals (:progress observation)))))))
 
+(deftest timeout-cleanup-waits-for-running-cancellation-task
+    (with-open [con (jdbc/get-connection (duckdb/memory-datasource))
+              ^DuckDBPreparedStatement stmt
+              (exec/prepare con "select sum(i) as v from range(10000000) t(i)")]
+    (let [started (promise)
+          release (promise)
+          execution (future
+                      (exec/execute-with-timeout!
+                       stmt 0
+                       (fn [_]
+                         (deliver started true)
+                         @release)))]
+      (is (= true (deref started 5000 ::timeout)))
+      (is (= ::pending (deref execution 100 ::pending)))
+      (deliver release true)
+      (is (= true (deref execution 2000 ::timeout)))
+      (is (= {:v 49999995000000} (jdbc/execute-one! stmt))))))
+
 (deftest returns-parseable-native-profiling-json
   (let [ds (duckdb/memory-datasource)]
     (with-open [con (jdbc/get-connection ds)]
