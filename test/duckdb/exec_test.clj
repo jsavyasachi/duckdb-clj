@@ -112,6 +112,17 @@
           conj
           []))))
 
+(deftest streaming-reduction-refuses-foreign-datasources
+  (let [source (duckdb/memory-datasource)
+        foreign-source (proxy [javax.sql.DataSource] []
+                         (getConnection [] (.getConnection ^javax.sql.DataSource source)))]
+    (try
+      (exec/reduce-streaming foreign-source ["select 1"] (map :v) conj [])
+      (is false "foreign datasources must not be downgraded to URL-only connections")
+      (catch clojure.lang.ExceptionInfo error
+        (is (= :unsupported-streaming-datasource
+               (:duckdb/error (ex-data error))))))))
+
 (deftest reads-prepared-results-as-columnar-chunks
   (with-open [con (jdbc/get-connection (duckdb/memory-datasource))]
     (let [^DuckDBConnection duck-con (.unwrap con DuckDBConnection)]

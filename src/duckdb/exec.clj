@@ -26,22 +26,21 @@
     (instance? Connection ds)
     (throw (ex-info "Streaming mode must be enabled when the connection is opened"
                     {:duckdb/error :streaming-requires-datasource}))
-    ;; For a next.jdbc source, open a temporary connection and read its JDBC URL
-    ;; from metadata. Streaming needs its own connection because
-    ;; JDBC_STREAM_RESULTS is a connect-time property.
-    (or (map? ds) (instance? DataSource ds))
-    (with-open [con (jdbc/get-connection ds)]
-      (.getURL (.getMetaData con)))
     :else
     (throw (ex-info (str "Unsupported DuckDB streaming source: " (pr-str (class ds)))
                     {:duckdb/error :invalid-streaming-source
                      :source-class (.getName (class ds))}))))
 
 (defn- streaming-connection ^Connection [ds]
-  (let [properties (doto (Properties.)
-                     (.setProperty DuckDBDriver/JDBC_STREAM_RESULTS "true"))
-        con (or (duckdb/open-streaming-connection ds)
-                (.connect (DuckDBDriver.) (jdbc-url ds) properties))]
+  (let [con (or (duckdb/open-streaming-connection ds)
+                (when (string? ds)
+                  (.connect (DuckDBDriver.) (jdbc-url ds)
+                            (doto (Properties.)
+                              (.setProperty DuckDBDriver/JDBC_STREAM_RESULTS "true"))))
+                (throw (ex-info
+                        "Streaming cannot preserve the configuration of a foreign datasource"
+                        {:duckdb/error :unsupported-streaming-datasource
+                         :source-class (.getName (class ds))})))]
     (or con
         (throw (ex-info "Source is not a DuckDB JDBC URL"
                         {:duckdb/error :invalid-streaming-source})))))
@@ -52,7 +51,9 @@
   sql is a next.jdbc SQL vector (or a SQL string). The Connection, statement,
   and ResultSet remain open until transduction finishes, including early
   termination via reduced. A pre-opened Connection cannot be used because
-  JDBC_STREAM_RESULTS is a connection property."
+  JDBC_STREAM_RESULTS is a connection property. Strings and datasources
+  created by duckdb.core are supported; foreign datasource implementations
+  are rejected because their connection configuration cannot be preserved."
   ([ds sql xf f init]
    (reduce-streaming ds sql nil xf f init))
   ([ds sql opts xf f init]
