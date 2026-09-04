@@ -2,7 +2,7 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/net.clojars.savya/duckdb-clj.svg)](https://clojars.org/net.clojars.savya/duckdb-clj)
 [![cljdoc](https://cljdoc.org/badge/net.clojars.savya/duckdb-clj)](https://cljdoc.org/d/net.clojars.savya/duckdb-clj/CURRENT)
-[![test](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/jsavyasachi/duckdb-clj/actions/workflows/test.yml)
+[![test](https://github.com/savyalabs/duckdb-clj/actions/workflows/test.yml/badge.svg)](https://github.com/savyalabs/duckdb-clj/actions/workflows/test.yml)
 
 DuckDB type coercion and helpers for Clojure over `next.jdbc`. Chunked reads
 cover UUID, JSON, BLOB, TIME, ENUM, LIST, STRUCT, and MAP columns, converting

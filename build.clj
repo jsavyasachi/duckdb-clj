@@ -23,12 +23,12 @@
                 :version version
                 :basis @basis
                 :src-dirs ["src"]
-                :scm {:url "https://github.com/jsavyasachi/duckdb-clj"
-                      :connection "scm:git:https://github.com/jsavyasachi/duckdb-clj.git"
-                      :developerConnection "scm:git:ssh://git@github.com/jsavyasachi/duckdb-clj.git"
+                :scm {:url "https://github.com/savyalabs/duckdb-clj"
+                      :connection "scm:git:https://github.com/savyalabs/duckdb-clj.git"
+                      :developerConnection "scm:git:ssh://git@github.com/savyalabs/duckdb-clj.git"
                       :tag (str "v" version)}
                 :pom-data [[:description "DuckDB type coercion and helpers for Clojure over next.jdbc: LIST, STRUCT, MAP, and more."]
-                           [:url "https://github.com/jsavyasachi/duckdb-clj"]
+                           [:url "https://github.com/savyalabs/duckdb-clj"]
                            [:licenses
                             [:license
                              [:name "Eclipse Public License 2.0"]
